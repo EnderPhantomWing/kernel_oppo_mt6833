@@ -8,11 +8,6 @@ on:
         required: false
         default: false
         type: boolean
-      enable_sukisu:
-        description: '启用 SukiSU-Ultra 支持'
-        required: false
-        default: false
-        type: boolean
       enable_resukisu:
         description: '启用 ReSukiSU 支持'
         required: false
@@ -90,22 +85,6 @@ jobs:
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash
 
-      # ========== SukiSU-Ultra 相关 ==========
-      - name: SukiSU-Ultra - 应用 legacy patch
-        if: inputs.enable_sukisu == true
-        run: |
-          echo "KSU_LOG: 开始下载并应用 SukiSU 官方 4.14 patch"
-          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          wget https://github.com/SukiSU-Ultra/SukiSU_patch/raw/main/4.14/ksu_hooks_4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
-          patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
-
-      - name: SukiSU-Ultra - 植入 KSU 核心
-        if: inputs.enable_sukisu == true
-        run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          rm -rf KernelSU
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
-          
       # ========== ReSukiSU 相关 ==========
       - name: ReSukiSU - 应用 legacy patch
         if: inputs.enable_resukisu == true
