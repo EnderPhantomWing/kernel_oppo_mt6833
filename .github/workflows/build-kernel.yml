@@ -1,4 +1,4 @@
-name: 编译内核（可配置 KernelSU / SukiSu-Ultra / ReSukiSU / KernelSU-Next / LXC-Docker / KVM）
+name: 编译内核（可配置 KernelSU / ReSukiSU / LXC-Docker / KVM）
 
 on:
   workflow_dispatch:
@@ -10,11 +10,6 @@ on:
         type: boolean
       enable_resukisu:
         description: '启用 ReSukiSU 支持'
-        required: false
-        default: false
-        type: boolean
-      enable_kernelsu_next:
-        description: '启用 KernelSU-Next 支持'
         required: false
         default: false
         type: boolean
@@ -98,24 +93,8 @@ jobs:
         if: inputs.enable_resukisu == true
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          rm -rf KernelSU
+          rm -rf ReSukiSU
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
-
-      # ========== KernelSU-Next 相关 ==========
-      # - name: KernelSU-Next - 应用 legacy patch
-      #   if: inputs.enable_kernelsu_next == true
-      #   run: |
-      #     echo "KSU_LOG: 开始下载并应用 RKSU 官方 4.14 patch"
-      #     cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-      #     wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
-      #     patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
-
-      - name: KernelSU-Next - 植入 KSU 核心
-        if: inputs.enable_kernelsu_next == true
-        run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          rm -rf KernelSU
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
 
       # ========== LXC / Docker 支持 ==========
       - name: LXC/Docker - 开启内核配置
