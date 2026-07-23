@@ -1,4 +1,4 @@
-name: 编译内核（可配置 KernelSU /ReSukiSU / LXC-Docker / KVM）
+name: (Martix)编译内核（可配置 KernelSU /ReSukiSU / LXC-Docker / KVM）
 
 on:
   workflow_dispatch:
