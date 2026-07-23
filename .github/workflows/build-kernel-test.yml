@@ -47,7 +47,7 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.enable_all_roots }}" = "true" ]; then
             # 当启用全部构建时，构建所有root管理器
-            ROOT_CONFIGS='["kernelsu", "sukisu", "resukisu", "kernelsu_next"]'
+            ROOT_CONFIGS='["kernelsu", "resukisu", "kernelsu_next"]'
             TOTAL_COUNT=4
           else
             # 否则根据勾选情况构建
