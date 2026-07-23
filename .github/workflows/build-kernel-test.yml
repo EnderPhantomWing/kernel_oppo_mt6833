@@ -18,11 +18,6 @@ on:
         required: false
         default: false
         type: boolean
-      enable_kernelsu_next:
-        description: '启用 KernelSU-Next 支持'
-        required: false
-        default: false
-        type: boolean
       enable_lxc_docker:
         description: '启用 LXC / Docker 支持（需配合 KernelSU）'
         required: false
@@ -47,7 +42,7 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.enable_all_roots }}" = "true" ]; then
             # 当启用全部构建时，构建所有root管理器
-            ROOT_CONFIGS='["kernelsu", "resukisu", "kernelsu_next"]'
+            ROOT_CONFIGS='["kernelsu", "resukisu"]'
             TOTAL_COUNT=4
           else
             # 否则根据勾选情况构建
@@ -57,9 +52,6 @@ jobs:
             fi
             if [ "${{ github.event.inputs.enable_resukisu }}" = "true" ]; then
               ROOT_LIST="${ROOT_LIST} resukisu"
-            fi
-            if [ "${{ github.event.inputs.enable_kernelsu_next }}" = "true" ]; then
-              ROOT_LIST="${ROOT_LIST} kernelsu_next"
             fi
             
             if [ -z "$ROOT_LIST" ]; then
@@ -155,14 +147,6 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
-
-      # ========== KernelSU-Next 相关 ==========
-      - name: KernelSU-Next - 植入 KSU 核心
-        if: matrix.root == 'kernelsu_next'
-        run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          rm -rf KernelSU
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
 
       # ========== LXC / Docker 支持 ==========
       - name: LXC/Docker - 开启内核配置
