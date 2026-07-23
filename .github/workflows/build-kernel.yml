@@ -30,7 +30,6 @@ jobs:
           sudo apt-get update
           sudo -E apt-get -y -qq install git make bc bison ccache openssl dos2unix zip kmod cpio flex libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler ca-certificates python3 binutils binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
           mkdir -p $GITHUB_WORKSPACE/kernel_workspace
-
       - name: 下载 Gcc 编译器
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
@@ -40,19 +39,16 @@ jobs:
           mkdir gcc32
           wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
           tar -C gcc32/ -zxvf gcc-arm.tar.gz
-
       - name: 下载 Clang 编译器
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           mkdir clang-aosp
           git clone -q --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 -b 10.0 clang-aosp
-
       - name: 下载内核源码
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           git clone https://github.com/LF-Repo/kernel_oppo_mt6833 android-kernel
           cd android-kernel
-
       - name: 设置 ccache 缓存
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -67,14 +63,12 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
           patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
-
       - name: KernelSU - 植入 KSU 核心
         if: inputs.enable_kernelsu == true
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash
-
       # ========== LXC / Docker 支持 ==========
       - name: LXC/Docker - 开启内核配置
         if: inputs.enable_lxc_docker == true
@@ -83,14 +77,12 @@ jobs:
           wget https://github.com/wu17481748/lxc-docker/releases/download/lxc-docker-2config/LXC-DOCKER-OPEN-CONFIG.sh
           chmod +x LXC-DOCKER-OPEN-CONFIG.sh
           ./LXC-DOCKER-OPEN-CONFIG.sh android-kernel/arch/arm64/configs/PFGM00_defconfig -w
-
       - name: LXC/Docker - 禁用 task_turbo 模块
         if: inputs.enable_lxc_docker == true
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           sed -i '/CONFIG_MTK_TASK_TURBO/d' arch/arm64/configs/PFGM00_defconfig
           echo "# CONFIG_MTK_TASK_TURBO is not set" >> arch/arm64/configs/PFGM00_defconfig
-
       - name: LXC/Docker - 打入 runc 补丁
         if: inputs.enable_lxc_docker == true
         run: |
@@ -103,7 +95,6 @@ jobs:
           if [ -f android-kernel/kernel/cgroup/cgroup.c ]; then
             ./runcpatch.sh android-kernel/kernel/cgroup/cgroup.c
           fi
-
       - name: LXC/Docker - 打入 xt_qtaguid 补丁
         if: inputs.enable_lxc_docker == true
         run: |
@@ -112,14 +103,12 @@ jobs:
             wget https://github.com/wu17481748/lxc-docker/releases/download/lxc/lxc.patch
             patch -p0 < lxc.patch
           fi
-
       - name: LXC/Docker - 关闭 ANDROID_PARANOID_NETWORK
         if: inputs.enable_lxc_docker == true
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' android-kernel/arch/arm64/configs/PFGM00_defconfig
           echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
-
       # ========== KVM 支持 ==========
       - name: KVM - 开启配置
         if: inputs.enable_kvm == true
@@ -129,7 +118,6 @@ jobs:
           echo "CONFIG_KVM=y" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
           echo "CONFIG_VHOST_NET=y" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
           echo "CONFIG_VHOST_CROSS_ENDIAN_LEGACY=y" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
-
       # ========== 编译内核 ==========
       - name: 开始编译内核
         run: |
@@ -150,7 +138,6 @@ jobs:
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             LD=ld.lld \
             KCFLAGS="$KCFLAGS_EXTRA"
-
       # ========== 打包 AnyKernel3 ==========
       - name: 制作 AnyKernel3 卡刷包
         run: |
@@ -162,7 +149,6 @@ jobs:
           sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
           cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           rm -rf AnyKernel3/.git* AnyKernel3/README.md
-
       - name: 上传 AnyKernel3 包
         uses: actions/upload-artifact@v4
         with:
