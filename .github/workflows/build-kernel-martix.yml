@@ -1,8 +1,13 @@
-name: 编译内核（可配置 KernelSU / ReSukiSU / LXC-Docker / KVM）
+name: (Martix) 编译内核（可配置 KernelSU /ReSukiSU / LXC-Docker / KVM）
 
 on:
   workflow_dispatch:
     inputs:
+      enable_all_roots:
+        description: '构建所有 Root 管理器（Matrix 矩阵构建）'
+        required: false
+        default: false
+        type: boolean
       enable_kernelsu:
         description: '启用 KernelSU 支持'
         required: false
@@ -25,15 +30,62 @@ on:
         type: boolean
 
 jobs:
-  build:
+  # 定义矩阵构建的配置
+  setup-matrix:
     runs-on: ubuntu-latest
+    outputs:
+      root-configs: ${{ steps.set-matrix.outputs.root-configs }}
+      total-count: ${{ steps.set-matrix.outputs.total-count }}
+    steps:
+      - name: 设置矩阵配置
+        id: set-matrix
+        run: |
+          if [ "${{ github.event.inputs.enable_all_roots }}" = "true" ]; then
+            # 当启用全部构建时，构建所有root管理器
+            ROOT_CONFIGS='["kernelsu", "resukisu"]'
+            TOTAL_COUNT=4
+          else
+            # 否则根据勾选情况构建
+            ROOT_LIST=""
+            if [ "${{ github.event.inputs.enable_kernelsu }}" = "true" ]; then
+              ROOT_LIST="${ROOT_LIST} kernelsu"
+            fi
+            if [ "${{ github.event.inputs.enable_resukisu }}" = "true" ]; then
+              ROOT_LIST="${ROOT_LIST} resukisu"
+            fi
+            
+            if [ -z "$ROOT_LIST" ]; then
+              ROOT_LIST="none"
+            fi
+            
+            # 转换为JSON数组
+            ROOT_CONFIGS=$(echo $ROOT_LIST | tr ' ' '\n' | jq -R . | jq -s .)
+            TOTAL_COUNT=$(echo $ROOT_CONFIGS | jq length)
+          fi
+          
+          echo "root-configs=$ROOT_CONFIGS" >> $GITHUB_OUTPUT
+          echo "total-count=$TOTAL_COUNT" >> $GITHUB_OUTPUT
+          echo "Root configs: $ROOT_CONFIGS"
+          echo "Total count: $TOTAL_COUNT"
+
+  build:
+    needs: setup-matrix
+    # 如果有启用的root配置则运行，否则跳过
+    if: needs.setup-matrix.outputs.total-count != '0' && needs.setup-matrix.outputs.root-configs != '["none"]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        root: ${{ fromJson(needs.setup-matrix.outputs.root-configs) }}
+      fail-fast: false
+    env:
+      ROOT_TYPE: ${{ matrix.root }}
     steps:
       - uses: actions/checkout@v4
 
       - name: 构建编译内核环境
         run: |
           sudo apt-get update
-          sudo -E apt-get -y -qq install git make bc bison ccache openssl dos2unix zip kmod cpio flex libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler ca-certificates python3 binutils binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+          sudo -E apt-get -y -qq install git make bc bison ccache openssl dos2unix zip kmod cpio flex libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler ca-certificates python3 binutils binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi jq
           mkdir -p $GITHUB_WORKSPACE/kernel_workspace
 
       - name: 下载 Gcc 编译器
@@ -61,28 +113,28 @@ jobs:
       - name: 设置 ccache 缓存
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: build-kernel-oppo-mt6833
+          key: build-kernel-oppo-mt6833-${{ matrix.root }}
           max-size: 2G
 
       # ========== KernelSU 相关 ==========
       - name: KernelSU - 应用 legacy patch
-        if: inputs.enable_kernelsu == true
+        if: matrix.root == 'kernelsu'
         run: |
           echo "KSU_LOG: 开始下载并应用 RKSU 官方 4.14 patch"
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
           patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
 
-      - name: KernelSU - 植入 KSU
-        if: inputs.enable_kernelsu == true
+      - name: KernelSU - 植入 KernelSU
+        if: matrix.root == 'kernelsu'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash
-
+          
       # ========== ReSukiSU 相关 ==========
       - name: ReSukiSU - 应用 legacy patch
-        if: inputs.enable_resukisu == true
+        if: matrix.root == 'resukisu'
         run: |
           echo "KSU_LOG: 开始下载并应用 ReSukiSU 官方 4.14 patch"
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
@@ -90,10 +142,10 @@ jobs:
           patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
 
       - name: ReSukiSU - 植入 KSU 核心
-        if: inputs.enable_resukisu == true
+        if: matrix.root == 'resukisu'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          rm -rf ReSukiSU
+          rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
 
       # ========== LXC / Docker 支持 ==========
@@ -176,18 +228,20 @@ jobs:
       - name: 制作 AnyKernel3 卡刷包
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
+          # 统一使用官方 osm0sis 的 AnyKernel3（若需更换源可在此调整）
+          # ak3 刷入问题修复：https://github.com/LF-Repo/kernel_oppo_mt6833/pull/1/changes
           git clone https://github.com/EnderPhantomWing/AnyKernel3
           cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           rm -rf AnyKernel3/.git* AnyKernel3/README.md
 
-      - name: 上传 AnyKernel3 包
+      - name: 上传 AnyKernel3 包 - ${{ matrix.root }}
         uses: actions/upload-artifact@v4
         with:
-          name: AnyKernel.zip
+          name: AnyKernel-${{ matrix.root }}.zip
           path: kernel_workspace/AnyKernel3/*
 
-      - name: 上传内核镜像
+      - name: 上传内核镜像 - ${{ matrix.root }}
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-Image.gz
+          name: kernel-Image-${{ matrix.root }}.gz
           path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
