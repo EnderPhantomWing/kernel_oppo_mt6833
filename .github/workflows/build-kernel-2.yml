@@ -61,7 +61,7 @@ on:
         default: 'main'
         type: choice
         options:
-          - main
+          - 4.14.186
 
 jobs:
   # ================================
