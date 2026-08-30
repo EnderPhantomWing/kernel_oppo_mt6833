@@ -147,8 +147,8 @@ jobs:
       - name: ReSukiSU - 应用 legacy patch
         if: matrix.root == 'resukisu'
         run: |
-          if [ "${{ github.event.inputs.enable_susfs }}" == "ture" ]; then
-            echo "KSU_LOG: SUSFS 使用 ReSukiSU inline hooks, 跳过 4.15 manual hook patch"
+          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
+            echo "KSU_LOG: SUSFS 使用 ReSukiSU inline hooks，跳过 4.14 manual hook patch"
           else
             echo "KSU_LOG: 开始下载并应用 ReSukiSU 官方 4.14 patch"
             cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
@@ -172,12 +172,12 @@ jobs:
           fi
 
       - name: SUSFS - 应用 SUSFS patch
-        if: inputs.enable_susfs == true
+        if: matrix.root == 'resukisu' && inputs.enable_susfs == true
         run: |
           if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
             echo "KSU_LOG: 开启 SUSFS"
-            # wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
-            wget https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.14/kernel_patches/50_add_susfs_in_kernel-4.14.patch -O susfs-4.14.patch
+            wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
+            # wget https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.14/kernel_patches/50_add_susfs_in_kernel-4.14.patch -O susfs-4.14.patch
             patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
             # A label cannot be followed directly by a declaration in GNU C89.
             sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
