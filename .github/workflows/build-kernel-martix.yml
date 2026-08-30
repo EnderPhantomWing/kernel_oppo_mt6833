@@ -261,6 +261,8 @@ jobs:
             cat << EOF >> $GITHUB_WORKSPACE/kernel_workspace/android-kernel/arch/arm64/configs/PFGM00_defconfig
             CONFIG_KSU=y
             CONFIG_KSU_SUSFS=y
+            CONFIG_KSU_MANUAL_HOOK=n
+            CONFIG_KSU_TRACEPOINT_HOOK=n
           EOF
             # echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
             # ./scripts/config --file out/.config \
@@ -273,6 +275,8 @@ jobs:
             cat << EOF >> $GITHUB_WORKSPACE/kernel_workspace/android-kernel/arch/arm64/configs/PFGM00_defconfig
             CONFIG_KSU=y
             CONFIG_KSU_MANUAL_HOOK=y
+            CONFIG_KSU_SUSFS=n
+            CONFIG_KSU_TRACEPOINT_HOOK=n
           EOF
             # ./scripts/config --file out/.config \
             #   --enable CONFIG_KSU \
