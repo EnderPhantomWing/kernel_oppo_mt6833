@@ -1,0 +1,496 @@
+name: (Matrix) 编译内核-2 MT6833（可配置 KernelSU / ReSukiSU / SUSFS / BBR / DroidSpace / LXC-Docker / KVM）
+
+on:
+  workflow_dispatch:
+    inputs:
+      # ========== Root 管理器选择（矩阵） ==========
+      enable_all_roots:
+        description: '构建所有 Root 管理器（矩阵构建）'
+        required: false
+        default: false
+        type: boolean
+      enable_kernelsu:
+        description: '启用 KernelSU 支持'
+        required: false
+        default: false
+        type: boolean
+      enable_resukisu:
+        description: '启用 ReSukiSU 支持'
+        required: false
+        default: false
+        type: boolean
+
+      # ========== 通用功能（来自 MT6853） ==========
+      enable_bbr:
+        description: '是否启用 BBR 加速（不了解请不要启用）'
+        required: false
+        default: true
+        type: boolean
+      enable_droidspace:
+        description: '是否启用 DroidSpace（不了解请不要启用）'
+        required: false
+        default: false
+        type: boolean
+      enable_susfs:
+        description: '是否加入 SUSFS'
+        required: false
+        default: false
+        type: boolean
+
+      # ========== 扩展功能（来自 MT6833 矩阵脚本） ==========
+      enable_lxc_docker:
+        description: '启用 LXC / Docker 支持（需配合 KernelSU）'
+        required: false
+        default: false
+        type: boolean
+      enable_kvm:
+        description: '启用 KVM 支持'
+        required: false
+        default: false
+        type: boolean
+
+      # ========== 其他 ==========
+      enable_tg:
+        description: '!!!请勿开启!!!/Don\'t Open'
+        required: false
+        default: false
+        type: boolean
+      branch:
+        description: '选择要 clone 的分支（仅供开发者选择）'
+        required: true
+        default: 'main'
+        type: choice
+        options:
+          - main
+
+jobs:
+  # ================================
+  # 1. 设置矩阵配置
+  # ================================
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      root-configs: ${{ steps.set-matrix.outputs.root-configs }}
+      total-count: ${{ steps.set-matrix.outputs.total-count }}
+    steps:
+      - name: 设置矩阵配置
+        id: set-matrix
+        run: |
+          if [ "${{ github.event.inputs.enable_all_roots }}" = "true" ]; then
+            ROOT_CONFIGS='["kernelsu", "resukisu"]'
+            TOTAL_COUNT=2
+          else
+            ROOT_LIST=""
+            if [ "${{ github.event.inputs.enable_kernelsu }}" = "true" ]; then
+              ROOT_LIST="${ROOT_LIST} kernelsu"
+            fi
+            if [ "${{ github.event.inputs.enable_resukisu }}" = "true" ]; then
+              ROOT_LIST="${ROOT_LIST} resukisu"
+            fi
+            if [ -z "$ROOT_LIST" ]; then
+              ROOT_LIST="none"
+            fi
+            # 生成紧凑 JSON 数组
+            ROOT_CONFIGS=$(echo $ROOT_LIST | tr ' ' '\n' | jq -R . | jq -s -c .)
+            TOTAL_COUNT=$(echo "$ROOT_CONFIGS" | jq length)
+          fi
+          echo "root-configs=$ROOT_CONFIGS" >> $GITHUB_OUTPUT
+          echo "total-count=$TOTAL_COUNT" >> $GITHUB_OUTPUT
+          echo "Root configs: $ROOT_CONFIGS"
+          echo "Total count: $TOTAL_COUNT"
+
+  # ================================
+  # 2. 矩阵构建
+  # ================================
+  build:
+    needs: setup-matrix
+    if: |
+      needs.setup-matrix.outputs.total-count != '0' &&
+      needs.setup-matrix.outputs.root-configs != '["none"]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        root: ${{ fromJson(needs.setup-matrix.outputs.root-configs) }}
+      fail-fast: false
+    env:
+      ROOT_TYPE: ${{ matrix.root }}
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- 环境准备（与 MT6853 一致） ----------
+      - name: 构建编译环境
+        run: |
+          sudo apt-get update
+          sudo -E apt-get -y -qq install \
+            git make bc bison ccache openssl dos2unix zip kmod cpio flex \
+            libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler \
+            ca-certificates python3 binutils binutils-aarch64-linux-gnu \
+            binutils-arm-linux-gnueabi jq
+          mkdir -p $GITHUB_WORKSPACE/kernel_workspace
+
+      - name: 下载 GCC 工具链（64位和32位）
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          mkdir gcc64
+          wget -O gcc-aarch64.tar.gz \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+          tar -C gcc64/ -zxvf gcc-aarch64.tar.gz
+          mkdir gcc32
+          wget -O gcc-arm.tar.gz \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+          tar -C gcc32/ -zxvf gcc-arm.tar.gz
+
+      - name: 下载 Clang 工具链（AOSP 版，与 MT6853 相同）
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          mkdir clang-aosp
+          git clone -q --depth=1 \
+            https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 \
+            -b 10.0 clang-aosp
+
+      - name: 下载内核源码（指定分支）
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          git clone -b "${{ github.event.inputs.branch }}" \
+            https://github.com/sanba0519/OPPO-Realme_kernel_4.14_MT6853.git android-kernel
+          # 注意：这里替换为实际的 MT6833 仓库地址（若不同请修改）
+
+      - name: 设置 ccache 缓存
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: build-kernel-mt6833-${{ matrix.root }}
+          max-size: 2G
+
+      # ---------- 补丁与 KernelSU 植入（与 MT6853 逻辑一致） ----------
+      - name: KernelSU - 应用 legacy patch
+        if: matrix.root == 'kernelsu'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          echo "KSU_LOG: 下载并应用 RKSU 官方 4.14 patch"
+          wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
+          patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; exit 1; }
+
+      - name: ReSukiSU - 应用 legacy patch
+        if: matrix.root == 'resukisu'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          echo "KSU_LOG: 下载并应用 ReSukiSU 官方 4.14 patch"
+          wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch
+          patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; exit 1; }
+
+      - name: SUSFS - 启用 SUSFS（仅当 enable_susfs 开启）
+        if: github.event.inputs.enable_susfs == 'true'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          echo "KSU_LOG: 开启 SUSFS"
+          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
+          patch -p1 -F 3 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
+          # 修复 GNU C89 标签问题
+          sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
+          grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
+            || { echo "SUSFS fdinfo 兼容修正失败"; exit 1; }
+
+      - name: KernelSU - 植入核心代码
+        if: matrix.root == 'kernelsu'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          rm -rf KernelSU
+          curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash
+
+      - name: ReSukiSU - 植入核心代码 + SUSFS inline hooks（若有）
+        if: matrix.root == 'resukisu'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          rm -rf KernelSU
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
+            echo "KSU_LOG: 应用 ReSukiSU SUSFS inline hooks"
+            curl -LfsS \
+              https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/susfs_inline_hook_patches.sh \
+              -o susfs_inline_hook_patches.sh
+            bash susfs_inline_hook_patches.sh
+          fi
+
+      # ---------- LXC/Docker（来自 MT6833 矩阵脚本） ----------
+      - name: LXC/Docker - 开启内核配置
+        if: github.event.inputs.enable_lxc_docker == 'true'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          wget https://github.com/wu17481748/lxc-docker/releases/download/lxc-docker-2config/LXC-DOCKER-OPEN-CONFIG.sh
+          chmod +x LXC-DOCKER-OPEN-CONFIG.sh
+          ./LXC-DOCKER-OPEN-CONFIG.sh android-kernel/arch/arm64/configs/PFGM00_defconfig -w
+
+      - name: LXC/Docker - 禁用 task_turbo 模块
+        if: github.event.inputs.enable_lxc_docker == 'true'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          sed -i '/CONFIG_MTK_TASK_TURBO/d' arch/arm64/configs/PFGM00_defconfig
+          echo "# CONFIG_MTK_TASK_TURBO is not set" >> arch/arm64/configs/PFGM00_defconfig
+
+      - name: LXC/Docker - 打入 runc 补丁
+        if: github.event.inputs.enable_lxc_docker == 'true'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          wget https://raw.githubusercontent.com/tomxi1997/lxc-docker-support-for-android/refs/heads/main/runcpatch.sh
+          chmod +x runcpatch.sh
+          if [ -f android-kernel/kernel/cgroup.c ]; then
+            ./runcpatch.sh android-kernel/kernel/cgroup.c
+          fi
+          if [ -f android-kernel/kernel/cgroup/cgroup.c ]; then
+            ./runcpatch.sh android-kernel/kernel/cgroup/cgroup.c
+          fi
+
+      - name: LXC/Docker - 打入 xt_qtaguid 补丁
+        if: github.event.inputs.enable_lxc_docker == 'true'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          if [ -f android-kernel/net/netfilter/xt_qtaguid.c ]; then
+            wget https://github.com/wu17481748/lxc-docker/releases/download/lxc/lxc.patch
+            patch -p0 < lxc.patch
+          fi
+
+      - name: LXC/Docker - 关闭 ANDROID_PARANOID_NETWORK
+        if: github.event.inputs.enable_lxc_docker == 'true'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' android-kernel/arch/arm64/configs/PFGM00_defconfig
+          echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
+
+      # ---------- KVM（来自 MT6833 矩阵脚本） ----------
+      - name: KVM - 开启配置
+        if: github.event.inputs.enable_kvm == 'true'
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          echo "CONFIG_VIRTUALIZATION=y" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
+          echo "CONFIG_KVM=y" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
+          echo "CONFIG_VHOST_NET=y" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
+          echo "CONFIG_VHOST_CROSS_ENDIAN_LEGACY=y" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
+
+      # ---------- 配置与编译（完全复用 MT6853 的配置逻辑） ----------
+      - name: 开始编译内核
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+          export KBUILD_BUILD_HOST=Github@EnderPhantomWing
+          export KBUILD_BUILD_USER=EnderPhantomWing
+
+          # LXC/Docker 可能需要额外 CFLAGS
+          if [ "${{ github.event.inputs.enable_lxc_docker }}" = "true" ]; then
+            KCFLAGS_EXTRA="-Wno-error=sizeof-array-div"
+          else
+            KCFLAGS_EXTRA=""
+          fi
+
+          # 1. 生成初始配置
+          make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
+
+          # 2. BBR 加速（来自 MT6853）
+          if [ "${{ github.event.inputs.enable_bbr }}" = "true" ]; then
+            echo "启用 BBR..."
+            ./scripts/config --file out/.config \
+              --enable TCP_CONG_BBR \
+              --enable NET_SCH_FQ
+          fi
+
+          # 3. DroidSpace 支持（来自 MT6853）
+          if [ "${{ github.event.inputs.enable_droidspace }}" = "true" ]; then
+            echo "启用 DroidSpace..."
+            ./scripts/config --file out/.config \
+              --enable SYSCTL \
+              --enable SYSVIPC \
+              --enable POSIX_MQUEUE \
+              --enable NAMESPACES \
+              --enable PID_NS \
+              --enable UTS_NS \
+              --enable IPC_NS \
+              --enable NET_NS \
+              --enable MULTIUSER \
+              --disable USER_NS \
+              --enable DEVTMPFS \
+              --enable DEVTMPFS_MOUNT \
+              --enable SECCOMP \
+              --enable SECCOMP_FILTER \
+              --enable CGROUPS \
+              --enable CGROUP_DEVICE \
+              --enable CGROUP_PIDS \
+              --enable MEMCG \
+              --enable CGROUP_SCHED \
+              --enable FAIR_GROUP_SCHED \
+              --enable CGROUP_FREEZER \
+              --enable CGROUP_NET_PRIO \
+              --enable OVERLAY_FS \
+              --enable TMPFS_POSIX_ACL \
+              --enable TMPFS_XATTR \
+              --enable FW_LOADER \
+              --enable FW_LOADER_USER_HELPER \
+              --enable FW_LOADER_COMPRESS \
+              --enable VETH \
+              --enable BRIDGE \
+              --enable NETFILTER \
+              --enable BRIDGE_NETFILTER \
+              --enable NETFILTER_ADVANCED \
+              --enable NF_CONNTRACK \
+              --enable IP_NF_IPTABLES \
+              --enable IP_NF_FILTER \
+              --enable NF_NAT \
+              --enable NF_TABLES \
+              --enable IP_NF_TARGET_MASQUERADE \
+              --enable NETFILTER_XT_TARGET_MASQUERADE \
+              --enable NETFILTER_XT_TARGET_TCPMSS \
+              --enable NETFILTER_XT_MATCH_ADDRTYPE \
+              --enable NF_CONNTRACK_NETLINK \
+              --enable NF_NAT_REDIRECT \
+              --enable IP_ADVANCED_ROUTER \
+              --enable IP_MULTIPLE_TABLES \
+              --enable NF_CONNTRACK_IPV4 \
+              --enable NF_NAT_IPV4 \
+              --enable IP_NF_NAT \
+              --enable NETFILTER_XT_MATCH_COMMENT \
+              --enable NETFILTER_XT_MATCH_STATE \
+              --enable NETFILTER_XT_MATCH_CONNTRACK \
+              --enable NETFILTER_XT_MATCH_MULTIPORT \
+              --enable NETFILTER_XT_MATCH_HL \
+              --enable NETFILTER_XT_TARGET_REJECT \
+              --enable IP_NF_TARGET_REJECT \
+              --enable NETFILTER_XT_TARGET_LOG \
+              --enable IP_NF_TARGET_ULOG \
+              --enable NETFILTER_XT_MATCH_RECENT \
+              --enable NETFILTER_XT_MATCH_LIMIT \
+              --enable NETFILTER_XT_MATCH_HASHLIMIT \
+              --enable NETFILTER_XT_MATCH_OWNER \
+              --enable NETFILTER_XT_MATCH_PKTTYPE \
+              --enable NETFILTER_XT_MATCH_MARK \
+              --enable NETFILTER_XT_TARGET_MARK \
+              --enable IP_SET \
+              --enable IP_SET_HASH_IP \
+              --enable IP_SET_HASH_NET \
+              --enable NETFILTER_XT_SET \
+              --enable NETFILTER_NETLINK_QUEUE \
+              --enable NETFILTER_NETLINK_LOG \
+              --enable NETFILTER_XT_TARGET_NFLOG \
+              --disable ANDROID_PARANOID_NETWORK
+          fi
+
+          # 4. KernelSU 配置（统一使用 manual hook，适配 Non-GKI）
+          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS（manual hook）"
+            ./scripts/config --file out/.config \
+              --enable KSU \
+              --enable KSU_SUSFS \
+              --enable KSU_MANUAL_HOOK \
+              --disable KSU_TRACEPOINT_HOOK
+          else
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK（无 SUSFS）"
+            ./scripts/config --file out/.config \
+              --enable KSU \
+              --enable KSU_MANUAL_HOOK \
+              --disable KSU_SUSFS \
+              --disable KSU_TRACEPOINT_HOOK
+          fi
+
+          # 5. 最终配置修正（来自 MT6853）
+          ./scripts/config --file out/.config \
+            --enable NAMESPACES \
+            --enable DEVTMPFS \
+            --disable USER_NS \
+            --enable DEVTMPFS_MOUNT \
+            --enable SECTION_MISMATCH_WARN_ONLY
+
+          # 6. 解析依赖并编译
+          make O=out ARCH=arm64 olddefconfig
+          make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            LD=ld.lld \
+            KCFLAGS="$KCFLAGS_EXTRA"
+
+      # ---------- 打包与上传（与 MT6853 一致，但添加特征后缀） ----------
+      - name: 制作 AnyKernel3 卡刷包
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          git clone https://github.com/EnderPhantomWing/AnyKernel3
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+          sed -i 's!block=/dev/block/by-name/boot;!block=auto;!g' AnyKernel3/anykernel.sh
+          sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
+          cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          rm -rf AnyKernel3/.git* AnyKernel3/README.md
+
+          # 生成带特征后缀的压缩包名（与 MT6853 格式相同）
+          NAME="MT6833-${{ matrix.root }}"
+          if [ "${{ github.event.inputs.enable_bbr }}" = "true" ]; then
+            NAME="${NAME}-BBR"
+          fi
+          if [ "${{ github.event.inputs.enable_droidspace }}" = "true" ]; then
+            NAME="${NAME}-DroidSpace"
+          fi
+          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
+            NAME="${NAME}-SUSFS"
+          fi
+          ZIP_NAME="${NAME}.zip"
+          (cd AnyKernel3 && zip -r9 "../${ZIP_NAME}" .)
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+
+      - name: 上传 AnyKernel3 包
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-${{ matrix.root }}
+          path: kernel_workspace/${{ env.ZIP_NAME }}
+
+      - name: 上传内核镜像
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-${{ matrix.root }}.gz
+          path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
+
+      # ---------- Telegram 推送（与 MT6853 完全一致） ----------
+      - name: 生成 Telegram 消息
+        if: github.event.inputs.enable_tg == 'true'
+        id: gen_caption
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_MSG=$(git log -1 --pretty=format:'%s')
+          {
+            echo "caption<<EOF"
+            echo "<pre>"
+            echo "🔧 Commit: ${COMMIT_SHA} - ${COMMIT_MSG}"
+            echo ""
+            echo "Kernel Info:"
+            echo "欧加真我 MT6833 通用内核 -- A12"
+            echo "Oplus/Realme MT6833 Universal Kernel -- A12"
+            echo ""
+            echo "📦 Feature:"
+            echo "Root方案:  ${{ matrix.root }}"
+            if [ "${{ github.event.inputs.enable_bbr }}" = "true" ]; then echo "✅ BBR"; else echo "❌ BBR"; fi
+            if [ "${{ github.event.inputs.enable_droidspace }}" = "true" ]; then echo "✅ DroidSpace"; else echo "❌ DroidSpace"; fi
+            if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then echo "✅ SUSFS-V2.2.0"; else echo "❌ SUSFS-V2.2.0"; fi
+            echo "</pre>"
+            echo " "
+            echo "Follow👉:@mt6853o"
+            echo "Dev: @sanba_0519"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 上传到 Telegram
+        if: github.event.inputs.enable_tg == 'true'
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          BOT_CI_SESSION: ${{ secrets.BOT_CI_SESSION }}
+          CAPTION: ${{ steps.gen_caption.outputs.caption }}
+        run: |
+          ZIP_PATH="$GITHUB_WORKSPACE/kernel_workspace/${{ env.ZIP_NAME }}"
+          if [ ! -f "$ZIP_PATH" ]; then
+            echo "找不到待上传文件: $ZIP_PATH"
+            exit 1
+          fi
+          echo "------------正在上传到 Telegram------------"
+          pip3 install telethon
+          python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
