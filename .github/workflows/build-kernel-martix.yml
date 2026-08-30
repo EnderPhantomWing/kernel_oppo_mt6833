@@ -1,4 +1,4 @@
-name: (Martix) 编译内核（可配置 KernelSU /ReSukiSU / LXC-Docker / KVM）
+name: (Martix) 编译内核（可配置 KernelSU / ReSukiSU / SUSFS / LXC-Docker / KVM）
 
 on:
   workflow_dispatch:
@@ -54,7 +54,7 @@ jobs:
           if [ "${{ github.event.inputs.enable_all_roots }}" = "true" ]; then
             # 当启用全部构建时，构建所有root管理器
             ROOT_CONFIGS='["kernelsu", "resukisu"]'
-            TOTAL_COUNT=4
+            TOTAL_COUNT=2
           else
             # 否则根据勾选情况构建
             ROOT_LIST=""
