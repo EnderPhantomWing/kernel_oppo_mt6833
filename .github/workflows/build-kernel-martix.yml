@@ -1,28 +1,39 @@
-name: (Martix) 编译内核（可配置 KernelSU /ReSukiSU / LXC-Docker / KVM）
+name: (Martix) 编译内核（可配置 KernelSU / ReSukiSU / SUSFS / LXC-Docker / KVM）
 
 on:
   workflow_dispatch:
     inputs:
+    
       enable_all_roots:
         description: '构建所有 Root 管理器（Matrix 矩阵构建）'
         required: false
         default: false
         type: boolean
+        
       enable_kernelsu:
         description: '启用 KernelSU 支持'
         required: false
         default: false
         type: boolean
+        
       enable_resukisu:
         description: '启用 ReSukiSU 支持'
         required: false
         default: false
         type: boolean
+
+      enable_susfs:
+        description: '启用 SUSFS 支持'
+        required: false
+        default: false
+        type: boolean
+      
       enable_lxc_docker:
         description: '启用 LXC / Docker 支持（需配合 KernelSU）'
         required: false
         default: false
         type: boolean
+        
       enable_kvm:
         description: '启用 KVM 支持'
         required: false
@@ -36,16 +47,15 @@ jobs:
     outputs:
       root-configs: ${{ steps.set-matrix.outputs.root-configs }}
       total-count: ${{ steps.set-matrix.outputs.total-count }}
-    steps:
+    steps:    
       - name: 设置矩阵配置
         id: set-matrix
         run: |
           if [ "${{ github.event.inputs.enable_all_roots }}" = "true" ]; then
-            # 当启用全部构建时，构建所有root管理器
+            # 全部构建时，直接定义两个元素
             ROOT_CONFIGS='["kernelsu", "resukisu"]'
-            TOTAL_COUNT=4
+            TOTAL_COUNT=2
           else
-            # 否则根据勾选情况构建
             ROOT_LIST=""
             if [ "${{ github.event.inputs.enable_kernelsu }}" = "true" ]; then
               ROOT_LIST="${ROOT_LIST} kernelsu"
@@ -53,16 +63,16 @@ jobs:
             if [ "${{ github.event.inputs.enable_resukisu }}" = "true" ]; then
               ROOT_LIST="${ROOT_LIST} resukisu"
             fi
-            
+
             if [ -z "$ROOT_LIST" ]; then
               ROOT_LIST="none"
             fi
-            
-            # 转换为JSON数组
-            ROOT_CONFIGS=$(echo $ROOT_LIST | tr ' ' '\n' | jq -R . | jq -s .)
-            TOTAL_COUNT=$(echo $ROOT_CONFIGS | jq length)
+
+            # 关键：使用 jq -s -c 生成紧凑（单行）JSON 数组
+            ROOT_CONFIGS=$(echo $ROOT_LIST | tr ' ' '\n' | jq -R . | jq -s -c .)
+            TOTAL_COUNT=$(echo "$ROOT_CONFIGS" | jq length)
           fi
-          
+
           echo "root-configs=$ROOT_CONFIGS" >> $GITHUB_OUTPUT
           echo "total-count=$TOTAL_COUNT" >> $GITHUB_OUTPUT
           echo "Root configs: $ROOT_CONFIGS"
@@ -136,10 +146,28 @@ jobs:
       - name: ReSukiSU - 应用 legacy patch
         if: matrix.root == 'resukisu'
         run: |
-          echo "KSU_LOG: 开始下载并应用 ReSukiSU 官方 4.14 patch"
-          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
-          patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
+          # if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
+          #   echo "KSU_LOG: SUSFS 使用 ReSukiSU inline hooks，跳过 4.14 manual hook patch"
+          # else
+            echo "KSU_LOG: 开始下载并应用 ReSukiSU 官方 4.14 patch"
+            cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+            wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
+            patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
+          # fi
+
+      - name: SUSFS - 启用 SUSFS
+        if: matrix.root == 'resukisu' && inputs.enable_susfs == true
+        run: |
+          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
+            echo "KSU_LOG: 开启 SUSFS"
+            wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
+            # wget https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.14/kernel_patches/50_add_susfs_in_kernel-4.14.patch -O susfs-4.14.patch
+            patch -p1 -F 3 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
+            # A label cannot be followed directly by a declaration in GNU C89.
+            sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
+            grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
+              || { echo "SUSFS fdinfo 4.14 兼容修正失败"; exit 1; }
+          fi
 
       - name: ReSukiSU - 植入 KSU 核心
         if: matrix.root == 'resukisu'
@@ -147,6 +175,14 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
+            echo "KSU_LOG: 应用 ReSukiSU SUSFS inline hooks"
+            curl -LfsS \
+              https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/susfs_inline_hook_patches.sh \
+              -o susfs_inline_hook_patches.sh \
+              || { echo "下载 SUSFS inline hook 脚本失败"; exit 1; }
+            bash susfs_inline_hook_patches.sh
+          fi
 
       # ========== LXC / Docker 支持 ==========
       - name: LXC/Docker - 开启内核配置
@@ -208,15 +244,36 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
-          export KBUILD_BUILD_HOST=AndroidDeveloper@Android.com
-          export KBUILD_BUILD_USER=AndroidDeveloper
+          export KBUILD_BUILD_HOST=Github@EnderPhantomWing
+          export KBUILD_BUILD_USER=EnderPhantomWing
+          
           # 如果启用 LXC/Docker，额外添加 KCFLAGS 忽略特定警告
           if [ "${{ inputs.enable_lxc_docker }}" = "true" ]; then
             KCFLAGS_EXTRA="-Wno-error=sizeof-array-div"
           else
             KCFLAGS_EXTRA=""
           fi
-          make -s -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
+
+          make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
+
+          # KernelSU 和 SUSFS 配置
+          # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
+          
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
+            ./scripts/config --file out/.config \
+              --enable CONFIG_KSU \
+              --enable CONFIG_KSU_SUSFS \
+              --enable CONFIG_KSU_MANUAL_HOOK \
+              --disable CONFIG_KSU_TRACEPOINT_HOOK
+          
+            ./scripts/config --file out/.config \
+              --enable CONFIG_KSU \
+              --enable CONFIG_KSU_MANUAL_HOOK \
+              --disable CONFIG_KSU_SUSFS \
+              --disable CONFIG_KSU_TRACEPOINT_HOOK
+          
+          # make -s -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
+          make O=out ARCH=arm64 olddefconfig
           make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
