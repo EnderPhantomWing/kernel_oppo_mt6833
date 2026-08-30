@@ -254,8 +254,10 @@ jobs:
             KCFLAGS_EXTRA=""
           fi
 
-          # # KernelSU 和 SUSFS 配置
-          # # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
+          make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
+
+          # KernelSU 和 SUSFS 配置
+          # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
           # if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
           #   cat << EOF >> $GITHUB_WORKSPACE/kernel_workspace/android-kernel/arch/arm64/configs/PFGM00_defconfig
           #     CONFIG_KSU=y
@@ -263,12 +265,12 @@ jobs:
           #     CONFIG_KSU_MANUAL_HOOK=n
           #     CONFIG_KSU_TRACEPOINT_HOOK=n
           # EOF
-          #   # echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
-          #   # ./scripts/config --file out/.config \
-          #   #   --enable CONFIG_KSU \
-          #   #   --enable CONFIG_KSU_SUSFS \
-          #   #   --disable CONFIG_KSU_MANUAL_HOOK \
-          #   #   --disable CONFIG_KSU_TRACEPOINT_HOOK
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
+            ./scripts/config --file out/.config \
+              --enable CONFIG_KSU \
+              --enable CONFIG_KSU_SUSFS \
+              --disable CONFIG_KSU_MANUAL_HOOK \
+              --disable CONFIG_KSU_TRACEPOINT_HOOK
           # elif [ "${{ github.event.inputs.enable_resukisu }}" = "true" ]; then
           #   echo "KSU_LOG: ReSukiSU 不启用 SUSFS，使用 manual hook"
           #   cat << EOF >> $GITHUB_WORKSPACE/kernel_workspace/android-kernel/arch/arm64/configs/PFGM00_defconfig
@@ -277,15 +279,15 @@ jobs:
           #     CONFIG_KSU_SUSFS=n
           #     CONFIG_KSU_TRACEPOINT_HOOK=n
           # EOF
-          #   # ./scripts/config --file out/.config \
-          #   #   --enable CONFIG_KSU \
-          #   #   --enable CONFIG_KSU_MANUAL_HOOK \
-          #   #   --disable CONFIG_KSU_SUSFS \
-          #   #   --disable CONFIG_KSU_TRACEPOINT_HOOK
+            ./scripts/config --file out/.config \
+              --enable CONFIG_KSU \
+              --enable CONFIG_KSU_MANUAL_HOOK \
+              --disable CONFIG_KSU_SUSFS \
+              --disable CONFIG_KSU_TRACEPOINT_HOOK
           # fi
           
-          make -s -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
-          # make O=out ARCH=arm64 olddefconfig
+          # make -s -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
+          make O=out ARCH=arm64 olddefconfig
           make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
