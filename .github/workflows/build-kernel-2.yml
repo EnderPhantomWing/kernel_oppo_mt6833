@@ -156,7 +156,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           git clone -b "${{ github.event.inputs.branch }}" \
-            https://github.com/sanba0519/OPPO-Realme_kernel_4.14_MT6853.git android-kernel
+            https://github.com/EnderPhantomWing/kernel_oppo_mt6833.git android-kernel
           # 注意：这里替换为实际的 MT6833 仓库地址（若不同请修改）
 
       - name: 设置 ccache 缓存
