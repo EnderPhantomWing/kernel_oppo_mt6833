@@ -21,6 +21,11 @@ on:
         type: boolean
 
       # ========== 通用功能（来自 MT6853） ==========
+      enable_bbr:
+        description: '是否启用 BBR 加速'
+        required: false
+        default: true
+        type: boolean
       enable_susfs:
         description: '是否加入 SUSFS'
         required: false
@@ -273,6 +278,15 @@ jobs:
           # 1. 生成初始配置
           make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
 
+          # 2. BBR 加速（来自 MT6853）
+          if [ "${{ github.event.inputs.enable_bbr }}" = "true" ]; then
+            echo "启用 BBR..."
+            ./scripts/config --file out/.config \
+              --enable CONFIG_TCP_CONG_BBR \
+              --enable CONFIG_NET_SCH_FQ
+            make O=out olddefconfig
+          fi
+
           # 4. KernelSU 配置（统一使用 manual hook，适配 Non-GKI）
           if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
             echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS（manual hook）"
@@ -315,6 +329,9 @@ jobs:
             NAME="MT6853-ReSukiSU"
           else
             NAME="MT6853-Rsuntk.KSU"
+          fi
+          if [ "${{ inputs.enable_bbr }}" = "true" ]; then
+            NAME="${NAME}-BBR"
           fi
           if [ "${{ inputs.enable_susfs }}" = "true" ]; then
             NAME="${NAME}-SUSFS"
