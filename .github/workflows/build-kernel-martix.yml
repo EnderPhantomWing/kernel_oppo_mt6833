@@ -155,6 +155,20 @@ jobs:
             patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
           fi
 
+      - name: SUSFS - 启用 SUSFS
+        if: matrix.root == 'resukisu' && inputs.enable_susfs == true
+        run: |
+          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
+            echo "KSU_LOG: 开启 SUSFS"
+            wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
+            # wget https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.14/kernel_patches/50_add_susfs_in_kernel-4.14.patch -O susfs-4.14.patch
+            patch -p1 -F 3 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
+            # A label cannot be followed directly by a declaration in GNU C89.
+            sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
+            grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
+              || { echo "SUSFS fdinfo 4.14 兼容修正失败"; exit 1; }
+          fi
+
       - name: ReSukiSU - 植入 KSU 核心
         if: matrix.root == 'resukisu'
         run: |
@@ -168,20 +182,6 @@ jobs:
               -o susfs_inline_hook_patches.sh \
               || { echo "下载 SUSFS inline hook 脚本失败"; exit 1; }
             bash susfs_inline_hook_patches.sh
-          fi
-
-      - name: SUSFS - 应用 SUSFS patch
-        if: matrix.root == 'resukisu' && inputs.enable_susfs == true
-        run: |
-          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
-            echo "KSU_LOG: 开启 SUSFS"
-            wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
-            # wget https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.14/kernel_patches/50_add_susfs_in_kernel-4.14.patch -O susfs-4.14.patch
-            patch -p1 -F 3 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
-            # A label cannot be followed directly by a declaration in GNU C89.
-            sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
-            grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
-              || { echo "SUSFS fdinfo 4.14 兼容修正失败"; exit 1; }
           fi
 
       # ========== LXC / Docker 支持 ==========
@@ -258,10 +258,10 @@ jobs:
           # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
           if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
             cat << EOF >> $GITHUB_WORKSPACE/kernel_workspace/android-kernel/arch/arm64/configs/PFGM00_defconfig
-            CONFIG_KSU=y
-            CONFIG_KSU_SUSFS=y
-            CONFIG_KSU_MANUAL_HOOK=n
-            CONFIG_KSU_TRACEPOINT_HOOK=n
+              CONFIG_KSU=y
+              CONFIG_KSU_SUSFS=y
+              CONFIG_KSU_MANUAL_HOOK=n
+              CONFIG_KSU_TRACEPOINT_HOOK=n
           EOF
             # echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS"
             # ./scripts/config --file out/.config \
@@ -272,10 +272,10 @@ jobs:
           elif [ "${{ github.event.inputs.enable_resukisu }}" = "true" ]; then
             echo "KSU_LOG: ReSukiSU 不启用 SUSFS，使用 manual hook"
             cat << EOF >> $GITHUB_WORKSPACE/kernel_workspace/android-kernel/arch/arm64/configs/PFGM00_defconfig
-            CONFIG_KSU=y
-            CONFIG_KSU_MANUAL_HOOK=y
-            CONFIG_KSU_SUSFS=n
-            CONFIG_KSU_TRACEPOINT_HOOK=n
+              CONFIG_KSU=y
+              CONFIG_KSU_MANUAL_HOOK=y
+              CONFIG_KSU_SUSFS=n
+              CONFIG_KSU_TRACEPOINT_HOOK=n
           EOF
             # ./scripts/config --file out/.config \
             #   --enable CONFIG_KSU \
