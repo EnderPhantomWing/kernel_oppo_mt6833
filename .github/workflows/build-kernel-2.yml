@@ -21,16 +21,6 @@ on:
         type: boolean
 
       # ========== 通用功能（来自 MT6853） ==========
-      enable_bbr:
-        description: '是否启用 BBR 加速（不了解请不要启用）'
-        required: false
-        default: true
-        type: boolean
-      enable_droidspace:
-        description: '是否启用 DroidSpace（不了解请不要启用）'
-        required: false
-        default: false
-        type: boolean
       enable_susfs:
         description: '是否加入 SUSFS'
         required: false
@@ -288,93 +278,6 @@ jobs:
           # 1. 生成初始配置
           make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
 
-          # 2. BBR 加速（来自 MT6853）
-          if [ "${{ github.event.inputs.enable_bbr }}" = "true" ]; then
-            echo "启用 BBR..."
-            ./scripts/config --file out/.config \
-              --enable TCP_CONG_BBR \
-              --enable NET_SCH_FQ
-          fi
-
-          # 3. DroidSpace 支持（来自 MT6853）
-          if [ "${{ github.event.inputs.enable_droidspace }}" = "true" ]; then
-            echo "启用 DroidSpace..."
-            ./scripts/config --file out/.config \
-              --enable SYSCTL \
-              --enable SYSVIPC \
-              --enable POSIX_MQUEUE \
-              --enable NAMESPACES \
-              --enable PID_NS \
-              --enable UTS_NS \
-              --enable IPC_NS \
-              --enable NET_NS \
-              --enable MULTIUSER \
-              --disable USER_NS \
-              --enable DEVTMPFS \
-              --enable DEVTMPFS_MOUNT \
-              --enable SECCOMP \
-              --enable SECCOMP_FILTER \
-              --enable CGROUPS \
-              --enable CGROUP_DEVICE \
-              --enable CGROUP_PIDS \
-              --enable MEMCG \
-              --enable CGROUP_SCHED \
-              --enable FAIR_GROUP_SCHED \
-              --enable CGROUP_FREEZER \
-              --enable CGROUP_NET_PRIO \
-              --enable OVERLAY_FS \
-              --enable TMPFS_POSIX_ACL \
-              --enable TMPFS_XATTR \
-              --enable FW_LOADER \
-              --enable FW_LOADER_USER_HELPER \
-              --enable FW_LOADER_COMPRESS \
-              --enable VETH \
-              --enable BRIDGE \
-              --enable NETFILTER \
-              --enable BRIDGE_NETFILTER \
-              --enable NETFILTER_ADVANCED \
-              --enable NF_CONNTRACK \
-              --enable IP_NF_IPTABLES \
-              --enable IP_NF_FILTER \
-              --enable NF_NAT \
-              --enable NF_TABLES \
-              --enable IP_NF_TARGET_MASQUERADE \
-              --enable NETFILTER_XT_TARGET_MASQUERADE \
-              --enable NETFILTER_XT_TARGET_TCPMSS \
-              --enable NETFILTER_XT_MATCH_ADDRTYPE \
-              --enable NF_CONNTRACK_NETLINK \
-              --enable NF_NAT_REDIRECT \
-              --enable IP_ADVANCED_ROUTER \
-              --enable IP_MULTIPLE_TABLES \
-              --enable NF_CONNTRACK_IPV4 \
-              --enable NF_NAT_IPV4 \
-              --enable IP_NF_NAT \
-              --enable NETFILTER_XT_MATCH_COMMENT \
-              --enable NETFILTER_XT_MATCH_STATE \
-              --enable NETFILTER_XT_MATCH_CONNTRACK \
-              --enable NETFILTER_XT_MATCH_MULTIPORT \
-              --enable NETFILTER_XT_MATCH_HL \
-              --enable NETFILTER_XT_TARGET_REJECT \
-              --enable IP_NF_TARGET_REJECT \
-              --enable NETFILTER_XT_TARGET_LOG \
-              --enable IP_NF_TARGET_ULOG \
-              --enable NETFILTER_XT_MATCH_RECENT \
-              --enable NETFILTER_XT_MATCH_LIMIT \
-              --enable NETFILTER_XT_MATCH_HASHLIMIT \
-              --enable NETFILTER_XT_MATCH_OWNER \
-              --enable NETFILTER_XT_MATCH_PKTTYPE \
-              --enable NETFILTER_XT_MATCH_MARK \
-              --enable NETFILTER_XT_TARGET_MARK \
-              --enable IP_SET \
-              --enable IP_SET_HASH_IP \
-              --enable IP_SET_HASH_NET \
-              --enable NETFILTER_XT_SET \
-              --enable NETFILTER_NETLINK_QUEUE \
-              --enable NETFILTER_NETLINK_LOG \
-              --enable NETFILTER_XT_TARGET_NFLOG \
-              --disable ANDROID_PARANOID_NETWORK
-          fi
-
           # 4. KernelSU 配置（统一使用 manual hook，适配 Non-GKI）
           if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
             echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS（manual hook）"
@@ -422,12 +325,6 @@ jobs:
 
           # 生成带特征后缀的压缩包名（与 MT6853 格式相同）
           NAME="MT6833-${{ matrix.root }}"
-          if [ "${{ github.event.inputs.enable_bbr }}" = "true" ]; then
-            NAME="${NAME}-BBR"
-          fi
-          if [ "${{ github.event.inputs.enable_droidspace }}" = "true" ]; then
-            NAME="${NAME}-DroidSpace"
-          fi
           if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
             NAME="${NAME}-SUSFS"
           fi
@@ -466,8 +363,6 @@ jobs:
             echo ""
             echo "📦 Feature:"
             echo "Root方案:  ${{ matrix.root }}"
-            if [ "${{ github.event.inputs.enable_bbr }}" = "true" ]; then echo "✅ BBR"; else echo "❌ BBR"; fi
-            if [ "${{ github.event.inputs.enable_droidspace }}" = "true" ]; then echo "✅ DroidSpace"; else echo "❌ DroidSpace"; fi
             if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then echo "✅ SUSFS-V2.2.0"; else echo "❌ SUSFS-V2.2.0"; fi
             echo "</pre>"
             echo " "
