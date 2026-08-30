@@ -51,7 +51,7 @@ on:
 
       # ========== 其他 ==========
       enable_tg:
-        description: '!!!请勿开启!!!/Don\'t Open'
+        description: "!!!请勿开启!!!/Don't Open"
         required: false
         default: false
         type: boolean
