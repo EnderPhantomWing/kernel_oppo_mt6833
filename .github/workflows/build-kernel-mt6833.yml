@@ -1,4 +1,4 @@
-name: (Matrix) 编译内核-2 MT6833（可配置 KernelSU / ReSukiSU / SUSFS / BBR / DroidSpace / LXC-Docker / KVM）
+name: 编译内核 MT6833（可配置 KernelSU / ReSukiSU / SUSFS / LXC-Docker / KVM）
 
 on:
   workflow_dispatch:
@@ -311,10 +311,10 @@ jobs:
       - name: 创建 AK3 后缀
         id: gen_name
         run: |
-          if [ "${{ matrix.root }}" = "ReSukiSU" ]; then
+          if [ "${{ matrix.root }}" = "resukisu" ]; then
             NAME="MT6853-ReSukiSU"
           else
-            NAME="MT6853-RKSU"
+            NAME="MT6853-Rsuntk.KSU"
           fi
           if [ "${{ inputs.enable_susfs }}" = "true" ]; then
             NAME="${NAME}-SUSFS"
