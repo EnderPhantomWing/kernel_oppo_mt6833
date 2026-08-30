@@ -146,14 +146,14 @@ jobs:
       - name: ReSukiSU - 应用 legacy patch
         if: matrix.root == 'resukisu'
         run: |
-          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
-            echo "KSU_LOG: SUSFS 使用 ReSukiSU inline hooks，跳过 4.14 manual hook patch"
-          else
+          # if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
+          #   echo "KSU_LOG: SUSFS 使用 ReSukiSU inline hooks，跳过 4.14 manual hook patch"
+          # else
             echo "KSU_LOG: 开始下载并应用 ReSukiSU 官方 4.14 patch"
             cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
             wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch || { echo "下载 patch 失败"; exit 1; }
             patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; cat ksu-4.14.patch; exit 1; }
-          fi
+          # fi
 
       - name: SUSFS - 启用 SUSFS
         if: matrix.root == 'resukisu' && inputs.enable_susfs == true
