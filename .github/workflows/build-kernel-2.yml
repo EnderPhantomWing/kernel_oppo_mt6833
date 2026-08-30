@@ -40,11 +40,6 @@ on:
         type: boolean
 
       # ========== 其他 ==========
-      enable_tg:
-        description: "!!!请勿开启!!!/Don't Open"
-        required: false
-        default: false
-        type: boolean
       branch:
         description: '选择要 clone 的分支（仅供开发者选择）'
         required: true
@@ -313,79 +308,40 @@ jobs:
             KCFLAGS="$KCFLAGS_EXTRA"
 
       # ---------- 打包与上传（与 MT6853 一致，但添加特征后缀） ----------
-      - name: 制作 AnyKernel3 卡刷包
+      - name: 创建 AK3 后缀
+        id: gen_name
+        run: |
+          if [ "${{ matrix.root }}" = "ReSukiSU" ]; then
+            NAME="MT6853-ReSukiSU"
+          else
+            NAME="MT6853-RKSU"
+          fi
+          if [ "${{ inputs.enable_susfs }}" = "true" ]; then
+            NAME="${NAME}-SUSFS"
+          fi
+          echo "artifact_name=${NAME}" >> $GITHUB_OUTPUT
+                
+      - name: 制作 AnyKernel3 包
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           git clone https://github.com/EnderPhantomWing/AnyKernel3
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-          sed -i 's!block=/dev/block/by-name/boot;!block=auto;!g' AnyKernel3/anykernel.sh
-          sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
           cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           rm -rf AnyKernel3/.git* AnyKernel3/README.md
 
-          # 生成带特征后缀的压缩包名（与 MT6853 格式相同）
-          NAME="MT6833-${{ matrix.root }}"
-          if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
-            NAME="${NAME}-SUSFS"
-          fi
-          ZIP_NAME="${NAME}.zip"
+          ZIP_NAME="${{ steps.gen_name.outputs.artifact_name }}.zip"
           (cd AnyKernel3 && zip -r9 "../${ZIP_NAME}" .)
-          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          ls -lh "${ZIP_NAME}"
 
       - name: 上传 AnyKernel3 包
         uses: actions/upload-artifact@v4
         with:
-          name: AnyKernel3-${{ matrix.root }}
-          path: kernel_workspace/${{ env.ZIP_NAME }}
+          name: ${{steps.gen_name.outputs.artifact_name}}
+          path: |
+            kernel_workspace/AnyKernel3/*
+            !kernel_workspace/AnyKernel3/*.zip
 
       - name: 上传内核镜像
         uses: actions/upload-artifact@v4
         with:
           name: Image-${{ matrix.root }}.gz
           path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
-
-      # ---------- Telegram 推送（与 MT6853 完全一致） ----------
-      - name: 生成 Telegram 消息
-        if: github.event.inputs.enable_tg == 'true'
-        id: gen_caption
-        run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          COMMIT_SHA=$(git rev-parse --short HEAD)
-          COMMIT_MSG=$(git log -1 --pretty=format:'%s')
-          {
-            echo "caption<<EOF"
-            echo "<pre>"
-            echo "🔧 Commit: ${COMMIT_SHA} - ${COMMIT_MSG}"
-            echo ""
-            echo "Kernel Info:"
-            echo "欧加真我 MT6833 通用内核 -- A12"
-            echo "Oplus/Realme MT6833 Universal Kernel -- A12"
-            echo ""
-            echo "📦 Feature:"
-            echo "Root方案:  ${{ matrix.root }}"
-            if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then echo "✅ SUSFS-V2.2.0"; else echo "❌ SUSFS-V2.2.0"; fi
-            echo "</pre>"
-            echo " "
-            echo "Follow👉:@mt6853o"
-            echo "Dev: @sanba_0519"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: 上传到 Telegram
-        if: github.event.inputs.enable_tg == 'true'
-        env:
-          API_ID: ${{ secrets.API_ID }}
-          API_HASH: ${{ secrets.API_HASH }}
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-          BOT_CI_SESSION: ${{ secrets.BOT_CI_SESSION }}
-          CAPTION: ${{ steps.gen_caption.outputs.caption }}
-        run: |
-          ZIP_PATH="$GITHUB_WORKSPACE/kernel_workspace/${{ env.ZIP_NAME }}"
-          if [ ! -f "$ZIP_PATH" ]; then
-            echo "找不到待上传文件: $ZIP_PATH"
-            exit 1
-          fi
-          echo "------------正在上传到 Telegram------------"
-          pip3 install telethon
-          python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$ZIP_PATH"
