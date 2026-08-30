@@ -52,11 +52,10 @@ jobs:
         id: set-matrix
         run: |
           if [ "${{ github.event.inputs.enable_all_roots }}" = "true" ]; then
-            # 当启用全部构建时，构建所有root管理器
+            # 全部构建时，直接定义两个元素
             ROOT_CONFIGS='["kernelsu", "resukisu"]'
             TOTAL_COUNT=2
           else
-            # 否则根据勾选情况构建
             ROOT_LIST=""
             if [ "${{ github.event.inputs.enable_kernelsu }}" = "true" ]; then
               ROOT_LIST="${ROOT_LIST} kernelsu"
@@ -64,16 +63,16 @@ jobs:
             if [ "${{ github.event.inputs.enable_resukisu }}" = "true" ]; then
               ROOT_LIST="${ROOT_LIST} resukisu"
             fi
-            
+
             if [ -z "$ROOT_LIST" ]; then
               ROOT_LIST="none"
             fi
-            
-            # 转换为JSON数组
-            ROOT_CONFIGS=$(echo $ROOT_LIST | tr ' ' '\n' | jq -R . | jq -s .)
-            TOTAL_COUNT=$(echo $ROOT_CONFIGS | jq length)
+
+            # 关键：使用 jq -s -c 生成紧凑（单行）JSON 数组
+            ROOT_CONFIGS=$(echo $ROOT_LIST | tr ' ' '\n' | jq -R . | jq -s -c .)
+            TOTAL_COUNT=$(echo "$ROOT_CONFIGS" | jq length)
           fi
-          
+
           echo "root-configs=$ROOT_CONFIGS" >> $GITHUB_OUTPUT
           echo "total-count=$TOTAL_COUNT" >> $GITHUB_OUTPUT
           echo "Root configs: $ROOT_CONFIGS"
