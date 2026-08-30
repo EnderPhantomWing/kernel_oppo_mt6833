@@ -265,8 +265,10 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
-          export KBUILD_BUILD_HOST=Github@EnderPhantomWing
-          export KBUILD_BUILD_USER=EnderPhantomWing
+          # export KBUILD_BUILD_HOST=Github@EnderPhantomWing
+          # export KBUILD_BUILD_USER=EnderPhantomWing
+          export KBUILD_BUILD_HOST=AndroidDeveloper@Android.com
+          export KBUILD_BUILD_USER=AndroidDeveloper
 
           # LXC/Docker 可能需要额外 CFLAGS
           if [ "${{ github.event.inputs.enable_lxc_docker }}" = "true" ]; then
