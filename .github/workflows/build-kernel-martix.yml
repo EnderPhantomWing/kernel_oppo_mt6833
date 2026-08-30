@@ -178,7 +178,7 @@ jobs:
             echo "KSU_LOG: 开启 SUSFS"
             wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
             # wget https://gitlab.com/simonpunk/susfs4ksu/-/raw/kernel-4.14/kernel_patches/50_add_susfs_in_kernel-4.14.patch -O susfs-4.14.patch
-            patch -p1 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
+            patch -p1 -F 3 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
             # A label cannot be followed directly by a declaration in GNU C89.
             sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
             grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
@@ -245,14 +245,17 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
-          export KBUILD_BUILD_HOST=AndroidDeveloper@Android.com
-          export KBUILD_BUILD_USER=AndroidDeveloper
+          export KBUILD_BUILD_HOST=Github@EnderPhantomWing
+          export KBUILD_BUILD_USER=EnderPhantomWing
+          
           # 如果启用 LXC/Docker，额外添加 KCFLAGS 忽略特定警告
           if [ "${{ inputs.enable_lxc_docker }}" = "true" ]; then
             KCFLAGS_EXTRA="-Wno-error=sizeof-array-div"
           else
             KCFLAGS_EXTRA=""
           fi
+
+          make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
 
           # KernelSU 和 SUSFS 配置
           # 如果启用了 SUSFS，无论哪个 SU 都必须启用 CONFIG_KSU_SUSFS
@@ -272,7 +275,8 @@ jobs:
               --disable CONFIG_KSU_TRACEPOINT_HOOK
           fi
           
-          make -s -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
+          # make -s -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
+          make O=out ARCH=arm64 olddefconfig
           make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
