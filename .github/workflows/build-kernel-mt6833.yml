@@ -265,10 +265,15 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
-          # export KBUILD_BUILD_HOST=Github@EnderPhantomWing
-          # export KBUILD_BUILD_USER=EnderPhantomWing
-          export KBUILD_BUILD_HOST=AndroidDeveloper@Android.com
-          export KBUILD_BUILD_USER=AndroidDeveloper
+          export KBUILD_BUILD_HOST=Github@EnderPhantomWing
+          export KBUILD_BUILD_USER=EnderPhantomWing
+          # export KBUILD_BUILD_HOST=AndroidDeveloper@Android.com
+          # export KBUILD_BUILD_USER=AndroidDeveloper
+
+          ISO_DATE=$(date -u +%Y%m%d)
+          COMMIT_SHORT=${GITHUB_SHA:0:10}
+          export LOCALVERSION="-${ISO_DATE}-${COMMIT_SHORT}-${{ github.run_number }}"
+          echo "LOCALVERSION=${LOCALVERSION}"
 
           # LXC/Docker 可能需要额外 CFLAGS
           if [ "${{ github.event.inputs.enable_lxc_docker }}" = "true" ]; then
@@ -322,6 +327,8 @@ jobs:
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             LD=ld.lld \
             KCFLAGS="$KCFLAGS_EXTRA"
+
+          make O=out ARCH=arm64 kernelrelease
 
       # ---------- 打包与上传（与 MT6853 一致，但添加特征后缀） ----------
       - name: 创建 AK3 后缀
