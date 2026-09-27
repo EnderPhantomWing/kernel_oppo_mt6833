@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: 触发全部 Root 管理器构建
         run: |
-          gh workflow run build.yml \
+          gh workflow run build-kernel-mt6833.yml \
             --repo "${{ github.repository }}" \
             -f enable_all_roots=true
         env:
@@ -22,7 +22,7 @@ jobs:
 
       - name: 触发 ReSukiSU + SUSFS 构建
         run: |
-          gh workflow run build.yml \
+          gh workflow run build-kernel-mt6833.yml \
             --repo "${{ github.repository }}" \
             -f enable_resukisu=true \
             -f enable_susfs=true
