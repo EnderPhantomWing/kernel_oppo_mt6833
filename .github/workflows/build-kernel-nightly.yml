@@ -18,7 +18,7 @@ jobs:
           GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
 
       - name: 等待前一个 workflow 初始化
-        run: sleep 30
+        run: sleep 1500
 
       - name: 触发 ReSukiSU + SUSFS 构建
         run: |
