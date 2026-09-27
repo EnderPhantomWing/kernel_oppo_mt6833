@@ -1,6 +1,7 @@
 name: Nightly trigger
+
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
   schedule:
     - cron: '0 8 * * *'
 
@@ -8,16 +9,22 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Build All Root Manager
+      - name: 触发全部 Root 管理器构建
         run: |
           gh workflow run build.yml \
-            -f enable_all_roots=true 
+            --repo "${{ github.repository }}" \
+            -f enable_all_roots=true
         env:
           GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
-      - name: Build ReSukiSU Manager with SUSFS
+
+      - name: 等待前一个 workflow 初始化
+        run: sleep 30
+
+      - name: 触发 ReSukiSU + SUSFS 构建
         run: |
           gh workflow run build.yml \
-            -f enable_resukisu=true
+            --repo "${{ github.repository }}" \
+            -f enable_resukisu=true \
             -f enable_susfs=true
         env:
           GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
