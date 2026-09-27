@@ -1,4 +1,4 @@
-name: 编译内核 MT6833（可配置 KernelSU / ReSukiSU / SUSFS / LXC-Docker / KVM）
+name: 编译内核 PFGM00-MT6833
 
 on:
   workflow_dispatch:
@@ -21,11 +21,6 @@ on:
         type: boolean
 
       # ========== 通用功能（来自 MT6853） ==========
-      enable_bbr:
-        description: '是否启用 BBR 加速'
-        required: false
-        default: false
-        type: boolean
       enable_susfs:
         description: '是否加入 SUSFS'
         required: false
@@ -185,15 +180,29 @@ jobs:
             || { echo "SUSFS fdinfo 兼容修正失败"; exit 1; }
 
       - name: KernelSU - 植入核心代码
+        id: ksuinline
         if: matrix.root == 'kernelsu'
         run: |
+          git clone --bare https://github.com/rsuntk/KernelSU.git
+          cd KernelSU.git
+          COUNT=$(git rev-list --count HEAD)
+          KSU_MANAGER_VERSION_CODE=$((29971 + COUNT))
+          echo "ksu_manager_version_code=$KSU_MANAGER_VERSION_CODE" >> "$GITHUB_OUTPUT"
+
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash
 
       - name: ReSukiSU - 植入核心代码 + SUSFS inline hooks（若有）
+        id: resukisuinline
         if: matrix.root == 'resukisu'
         run: |
+          git clone --bare https://github.com/ReSukiSU/ReSukiSU.git
+          cd ReSukiSU.git
+          COUNT=$(git rev-list --count HEAD)
+          RESUKISU_MANAGER_VERSION_CODE=$((30000 + COUNT + 700))
+          echo "resukisu_manager_version_code=$RESUKISU_MANAGER_VERSION_CODE" >> "$GITHUB_OUTPUT"
+
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
@@ -285,15 +294,6 @@ jobs:
           # 1. 生成初始配置
           make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
 
-          # 2. BBR 加速（来自 MT6853）
-          if [ "${{ github.event.inputs.enable_bbr }}" = "true" ]; then
-            echo "启用 BBR..."
-            ./scripts/config --file out/.config \
-              --enable CONFIG_TCP_CONG_BBR \
-              --enable CONFIG_NET_SCH_FQ
-            make O=out olddefconfig
-          fi
-
           # 4. KernelSU 配置（统一使用 manual hook，适配 Non-GKI）
           if [ "${{ github.event.inputs.enable_susfs }}" = "true" ]; then
             echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS（manual hook）"
@@ -335,18 +335,15 @@ jobs:
         id: gen_name
         run: |
           if [ "${{ matrix.root }}" = "resukisu" ]; then
-            NAME="MT6833-ReSukiSU"
+            NAME="PFGM00-MT6833-ReSukiSU"
           else
-            NAME="MT6833-Rsuntk.KSU"
-          fi
-          if [ "${{ inputs.enable_bbr }}" = "true" ]; then
-            NAME="${NAME}-BBR"
+            NAME="PFGM00-MT6833-RKSU"
           fi
           if [ "${{ inputs.enable_susfs }}" = "true" ]; then
             NAME="${NAME}-SUSFS"
           fi
           echo "artifact_name=${NAME}" >> $GITHUB_OUTPUT
-                
+
       - name: 制作 AnyKernel3 包
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
@@ -374,3 +371,41 @@ jobs:
         with:
           name: Image-${{ matrix.root }}.gz
           path: kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
+
+      - name: 创建 release 标签
+        id: tag
+        run: |
+          BASE_DATE=$(date -u +'%Y%m%d')
+          TAG="${BASE_DATE}"
+
+          # 检查该标签是否已存在（作为 release 或 git tag）
+          if gh release view "${TAG}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            # 已有当天基础标签，循环查找下一个可用序号
+            N=2
+            while gh release view "${BASE_DATE}-${N}" --repo "${{ github.repository }}" > /dev/null 2>&1; do
+              N=$((N + 1))
+            done
+            TAG="${BASE_DATE}-${N}"
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Release tag: ${TAG}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 上传构建工件至release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          body: |
+            Automated release for commit ${{ github.sha }}
+            ReSukiSU Manager ${{ steps.resukisuinline.outputs.resukisu_manager_version_code }}
+            RKSU Manager ${{ steps.ksuinline.outputs.ksu_manager_version_code }}
+          files: |
+            kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
+            kernel_workspace/AnyKernel3/*
+            !kernel_workspace/AnyKernel3/*.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
