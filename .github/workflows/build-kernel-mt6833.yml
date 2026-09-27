@@ -335,9 +335,10 @@ jobs:
           export KBUILD_BUILD_HOST=Github@EnderPhantomWing
           export KBUILD_BUILD_USER=EnderPhantomWing
 
-          ISO_DATE=$(date -u +%Y%m%d)
+          BUILD_TIME=$(date -u +%Y%m%dT%H%M%SZ)
           COMMIT_SHORT=${GITHUB_SHA:0:10}
-          export LOCALVERSION="-${ISO_DATE}-${COMMIT_SHORT}-${{ github.run_number }}"
+          RUN_NUMBER=$(printf "%05d" "${{ github.run_number }}")
+          export LOCALVERSION="-g${COMMIT_SHORT}-${RUN_NUMBER}-${BUILD_TIME}"
           echo "LOCALVERSION=${LOCALVERSION}"
 
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
