@@ -102,11 +102,11 @@ jobs:
       - name: 生成发布标签
         id: tag
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ROOT_CONFIGS: ${{ needs.setup-matrix.outputs.root-configs }}
           ENABLE_SUSFS: ${{ inputs.enable_susfs }}
           ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
           ENABLE_KVM: ${{ inputs.enable_kvm }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           BASE_DATE=$(date -u +'%Y%m%d')
           COUNT=$(echo "$ROOT_CONFIGS" | jq length)
@@ -132,13 +132,8 @@ jobs:
             SUFFIX="${SUFFIX}-SUSFS"
           fi
 
-          # ---------- 查找当天该后缀第一个未使用的 N ----------
-          N=1
-          while gh release view "${BASE_DATE}-${N}-${SUFFIX}" \
-                  --repo "${{ github.repository }}" > /dev/null 2>&1; do
-            N=$((N + 1))
-          done
-          TAG="${BASE_DATE}-${N}-${SUFFIX}"
+          # ---------- 追加 build.{buildNumber} ----------
+          TAG="${BASE_DATE}-${SUFFIX}-build.${RUN_NUMBER}"
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "发布标签: ${TAG}"
