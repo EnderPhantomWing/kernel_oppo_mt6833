@@ -255,6 +255,13 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash
+          if [ "$ENABLE_SUSFS" = "true" ]; then
+            echo "KSU_LOG: 应用 KernelSU SUSFS 内联钩子"
+            curl -LfsS \
+              https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/susfs_inline_hook_patches.sh \
+              -o susfs_inline_hook_patches.sh
+            bash susfs_inline_hook_patches.sh
+          fi
 
       - name: ReSukiSU - 注入核心代码 + SUSFS 内联钩子
         id: resukisuinline
