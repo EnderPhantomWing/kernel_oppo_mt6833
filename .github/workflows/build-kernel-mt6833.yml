@@ -159,9 +159,6 @@ jobs:
     permissions:
       contents: write
       packages: read
-    outputs:
-      ksu_manager_version_code: ${{ steps.ksuinline.outputs.ksu_manager_version_code }}
-      resukisu_manager_version_code: ${{ steps.resukisuinline.outputs.resukisu_manager_version_code }}
 
     steps:
       - uses: actions/checkout@v4
@@ -253,6 +250,7 @@ jobs:
           KSU_MANAGER_VERSION_CODE=$((29971 + COUNT))
           echo "ksu_manager_version_code=$KSU_MANAGER_VERSION_CODE"
           echo "ksu_manager_version_code=$KSU_MANAGER_VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "$KSU_MANAGER_VERSION_CODE" > "$GITHUB_WORKSPACE/kernel_workspace/manager_version_kernelsu.txt"
 
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
@@ -268,6 +266,7 @@ jobs:
           RESUKISU_MANAGER_VERSION_CODE=$((30000 + COUNT + 700))
           echo "resukisu_manager_version_code=$RESUKISU_MANAGER_VERSION_CODE"
           echo "resukisu_manager_version_code=$RESUKISU_MANAGER_VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "$RESUKISU_MANAGER_VERSION_CODE" > "$GITHUB_WORKSPACE/kernel_workspace/manager_version_resukisu.txt"
 
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
@@ -334,6 +333,7 @@ jobs:
           echo "CONFIG_VHOST_CROSS_ENDIAN_LEGACY=y" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
 
       - name: 开始编译内核
+        id: build_kernel
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
@@ -385,7 +385,9 @@ jobs:
             LD=ld.lld \
             KCFLAGS="$KCFLAGS_EXTRA"
 
-          make O=out ARCH=arm64 kernelrelease
+          KERNEL_VERSION=$(make O=out ARCH=arm64 kernelrelease)
+          echo "KERNEL_VERSION=${KERNEL_VERSION}"
+          echo "$KERNEL_VERSION" > "$GITHUB_WORKSPACE/kernel_workspace/kernel_version_${{ matrix.root }}.txt"
 
       # ---------- 生成 artifact 名 ----------
       - name: 创建 AK3 后缀
@@ -418,6 +420,15 @@ jobs:
           ls -lh "${ZIP_NAME}"
 
       # ---------- 上传 artifacts ----------
+      - name: 上传版本信息
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-info-${{ matrix.root }}
+          path: |
+            kernel_workspace/kernel_version_${{ matrix.root }}.txt
+            kernel_workspace/manager_version_${{ matrix.root }}.txt
+          if-no-files-found: warn
+
       - name: 上传 AnyKernel3 zip
         uses: actions/upload-artifact@v4
         with:
@@ -448,43 +459,75 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: 输出变量汇总到 Summary
-        run: |
-          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
-          ### 构建变量汇总
-
-          | 变量 | 值 |
-          |------|-----|
-          | **分支 (branch)** | `${{ inputs.branch }}` |
-          | **Root 配置 (root-configs)** | `${{ needs.setup-matrix.outputs.root-configs }}` |
-          | **构建总数 (total-count)** | `${{ needs.setup-matrix.outputs.total-count }}` |
-          | **Release Tag** | `${{ needs.prepare.outputs.tag }}` |
-          | **启用 SUSFS** | `${{ inputs.enable_susfs }}` |
-          | **启用 LXC/Docker** | `${{ inputs.enable_lxc_docker }}` |
-          | **启用 KVM** | `${{ inputs.enable_kvm }}` |
-          | **RKSU 版本号** | `${{ needs.build.outputs.ksu_manager_version_code }}` |
-          | **ReSukiSU 版本号** | `${{ needs.build.outputs.resukisu_manager_version_code }}` |
-
-          ### 构建矩阵
-
-          | Root 类型 | Artifact 名称 |
-          |-----------|---------------|
-          | `${{ matrix.root }}` | `ak3-${{ matrix.root }}` |
-
-          ### 环境信息
-
-          | 变量 | 值 |
-          |------|-----|
-          | **Commit SHA** | `${{ github.sha }}` |
-          | **Run Number** | `${{ github.run_number }}` |
-          | **工作流名称** | `编译内核 PFGM00-MT6833` |
-          EOF
-    
       - name: 下载所有 artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: 生成版本汇总
+        id: version_summary
+        run: |
+          ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
+          SUMMARY=""
+          for root in $(echo "$ROOT_CONFIGS" | jq -r '.[]'); do
+            KV_FILE="artifacts/kernel_version_${root}.txt"
+            MV_FILE="artifacts/manager_version_${root}.txt"
+            if [ -f "$KV_FILE" ]; then KV=$(cat "$KV_FILE"); else KV="unknown"; fi
+            if [ -f "$MV_FILE" ]; then MV=$(cat "$MV_FILE"); else MV="unknown"; fi
+            SUMMARY="${SUMMARY}${root}: kernel=${KV}, manager=${MV}\n"
+          done
+          echo "summary<<EOF" >> "$GITHUB_OUTPUT"
+          echo -e "$SUMMARY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: 输出变量汇总到 Summary
+        run: |
+          ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
+          ENABLE_SUSFS='${{ inputs.enable_susfs }}'
+          {
+            echo "### 构建变量汇总"
+            echo ""
+            echo "| 变量 | 值 |"
+            echo "|------|-----|"
+            echo "| **分支 (branch)** | ${{ inputs.branch }} |"
+            echo "| **Root 配置 (root-configs)** | $ROOT_CONFIGS |"
+            echo "| **构建总数 (total-count)** | ${{ needs.setup-matrix.outputs.total-count }} |"
+            echo "| **Release Tag** | ${{ needs.prepare.outputs.tag }} |"
+            echo "| **启用 SUSFS** | ${{ inputs.enable_susfs }} |"
+            echo "| **启用 LXC/Docker** | ${{ inputs.enable_lxc_docker }} |"
+            echo "| **启用 KVM** | ${{ inputs.enable_kvm }} |"
+            echo ""
+            echo "### 构建矩阵"
+            echo ""
+            echo "| Root 类型 | Artifact 名称 | 内核版本 | 管理器版本 |"
+            echo "|-----------|---------------|----------|------------|"
+            for root in $(echo "$ROOT_CONFIGS" | jq -r '.[]'); do
+              if [ "$root" = "resukisu" ]; then
+                NAME="PFGM00-MT6833-ReSukiSU"
+              elif [ "$root" = "kernelsu" ]; then
+                NAME="PFGM00-MT6833-RKSU"
+              else
+                NAME="PFGM00-MT6833-$root"
+              fi
+              if [ "$ENABLE_SUSFS" = "true" ]; then
+                NAME="${NAME}-SUSFS"
+              fi
+              KV_FILE="artifacts/kernel_version_${root}.txt"
+              MV_FILE="artifacts/manager_version_${root}.txt"
+              if [ -f "$KV_FILE" ]; then KV=$(cat "$KV_FILE"); else KV="N/A"; fi
+              if [ -f "$MV_FILE" ]; then MV=$(cat "$MV_FILE"); else MV="N/A"; fi
+              echo "| $root | ak3-$root / ${NAME}.zip | $KV | $MV |"
+            done
+            echo ""
+            echo "### 环境信息"
+            echo ""
+            echo "| 变量 | 值 |"
+            echo "|------|-----|"
+            echo "| **Commit SHA** | ${{ github.sha }} |"
+            echo "| **Run Number** | ${{ github.run_number }} |"
+            echo "| **工作流名称** | 编译内核 PFGM00-MT6833 |"
+          } >> $GITHUB_STEP_SUMMARY
 
       - name: 列出下载的文件
         run: find artifacts -type f
@@ -496,10 +539,14 @@ jobs:
           name: ${{ needs.prepare.outputs.tag }}
           body: |
             Automated release for commit ${{ github.sha }} build ${{ github.run_number }}
+
+            Kernel/Manager Version Summary:
+            ${{ steps.version_summary.outputs.summary }}
+
             Root Driver Version Summary(null version infomation means unconstructed)
-            ReSukiSU Version: ${{ needs.build.outputs.resukisu_manager_version_code }}
-            RKSU Version: ${{ needs.build.outputs.ksu_manager_version_code }}
-          files: artifacts/**
+          files: |
+            artifacts/*.zip
+            artifacts/*.gz
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
