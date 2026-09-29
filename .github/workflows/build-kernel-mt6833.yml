@@ -105,24 +105,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ROOT_CONFIGS: ${{ needs.setup-matrix.outputs.root-configs }}
           ENABLE_SUSFS: ${{ inputs.enable_susfs }}
+          ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
+          ENABLE_KVM: ${{ inputs.enable_kvm }}
         run: |
           BASE_DATE=$(date -u +'%Y%m%d')
           COUNT=$(echo "$ROOT_CONFIGS" | jq length)
 
-          # ---------- 确定后缀 ----------
+          # ---------- 确定基础名称 ----------
           if [ "$COUNT" -gt 1 ]; then
-            # 多个管理器 -> All
-            SUFFIX="All"
+            BASE="All"
           elif [ "$COUNT" -eq 1 ]; then
-            R=$(echo "$ROOT_CONFIGS" | jq -r '.[0]')
-            # 仅启用 ReSukiSU 和 SUSFS -> SUSFS
-            if [ "$R" = "resukisu" ] && [ "$ENABLE_SUSFS" = "true" ]; then
-              SUFFIX="SUSFS"
-            else
-              SUFFIX="$R"
-            fi
+            BASE=$(echo "$ROOT_CONFIGS" | jq -r '.[0]')
           else
-            SUFFIX="none"
+            BASE="none"
+          fi
+
+          # ---------- 按顺序添加后缀：Docker > KVM > SUSFS ----------
+          SUFFIX="$BASE"
+          if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
+            SUFFIX="${SUFFIX}-Docker"
+          fi
+          if [ "$ENABLE_KVM" = "true" ]; then
+            SUFFIX="${SUFFIX}-KVM"
+          fi
+          if [ "$ENABLE_SUSFS" = "true" ]; then
+            SUFFIX="${SUFFIX}-SUSFS"
           fi
 
           # ---------- 查找当天该后缀第一个未使用的 N ----------
