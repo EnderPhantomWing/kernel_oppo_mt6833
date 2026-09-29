@@ -9,6 +9,7 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
+      # ========== 全部 Root 管理器构建 ==========
       - name: 触发全部 Root 管理器构建
         run: |
           gh workflow run build-kernel-mt6833.yml \
@@ -20,11 +21,87 @@ jobs:
       - name: 等待前一个 workflow 初始化
         run: sleep 1500
 
+      - name: 触发全部 Root管理器 + LXC/Docker 构建
+        run: |
+          gh workflow run build-kernel-mt6833.yml \
+            --repo "${{ github.repository }}" \
+            -f enable_all_roots=true \
+            -f enable_lxc_docker=true
+        env:
+          GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
+
+      - name: 等待前一个 workflow 初始化
+        run: sleep 1500
+
+      - name: 触发全部 Root管理器 + KVM 构建
+        run: |
+          gh workflow run build-kernel-mt6833.yml \
+            --repo "${{ github.repository }}" \
+            -f enable_all_roots=true \
+            -f enable_kvm=true
+        env:
+          GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
+
+      - name: 等待前一个 workflow 初始化
+        run: sleep 1500
+
+      - name: 触发全部 Root管理器 + LXC/Docker + KVM 构建
+        run: |
+          gh workflow run build-kernel-mt6833.yml \
+            --repo "${{ github.repository }}" \
+            -f enable_all_roots=true \
+            -f enable_lxc_docker=true \
+            -f enable_kvm=true
+
+      - name: 等待前一个 workflow 初始化
+        run: sleep 1500
+
+      # ========== ReSukiSU + SUSFS 管理器构建 ==========
       - name: 触发 ReSukiSU + SUSFS 构建
         run: |
           gh workflow run build-kernel-mt6833.yml \
             --repo "${{ github.repository }}" \
             -f enable_resukisu=true \
+            -f enable_susfs=true
+        env:
+          GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
+
+      - name: 等待前一个 workflow 初始化
+        run: sleep 1500
+
+      - name: 触发 ReSukiSU + LXC/Docker + SUSFS 构建
+        run: |
+          gh workflow run build-kernel-mt6833.yml \
+            --repo "${{ github.repository }}" \
+            -f enable_resukisu=true \
+            -f enable_lxc_docker=true \
+            -f enable_susfs=true
+        env:
+          GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
+
+      - name: 等待前一个 workflow 初始化
+        run: sleep 1500
+
+      - name: 触发 ReSukiSU + KVM + SUSFS 构建
+        run: |
+          gh workflow run build-kernel-mt6833.yml \
+            --repo "${{ github.repository }}" \
+            -f enable_resukisu=true \
+            -f enable_kvm=true \
+            -f enable_susfs=true
+        env:
+          GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
+
+      - name: 等待前一个 workflow 初始化
+        run: sleep 1500
+
+      - name: 触发 ReSukiSU + LXC/Docker + KVM + SUSFS 构建
+        run: |
+          gh workflow run build-kernel-mt6833.yml \
+            --repo "${{ github.repository }}" \
+            -f enable_resukisu=true \
+            -f enable_lxc_docker=true \
+            -f enable_kvm=true \
             -f enable_susfs=true
         env:
           GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
