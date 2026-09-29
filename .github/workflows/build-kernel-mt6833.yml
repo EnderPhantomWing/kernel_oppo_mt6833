@@ -1,4 +1,4 @@
-name: 编译内核 PFGM00-MT6833
+name: Build Kernel for PFGM00-MT6833
 
 on:
   workflow_dispatch:
@@ -22,14 +22,14 @@ on:
 
       # ========== 通用功能 ==========
       enable_susfs:
-        description: '是否加入 SUSFS'
+        description: '启用 SUSFS'
         required: false
         default: false
         type: boolean
 
       # ========== 扩展功能 ==========
       enable_lxc_docker:
-        description: '启用 LXC / Docker 支持（需配合 KernelSU）'
+        description: '启用 LXC / Docker 支持（需要 KernelSU）'
         required: false
         default: false
         type: boolean
@@ -41,7 +41,7 @@ on:
 
       # ========== 其他 ==========
       branch:
-        description: '选择要 clone 的分支（仅供开发者选择）'
+        description: '选择要克隆的分支（仅限开发者）'
         required: true
         default: '4.14.186'
         type: choice
@@ -84,11 +84,11 @@ jobs:
           fi
           echo "root-configs=$ROOT_CONFIGS" >> $GITHUB_OUTPUT
           echo "total-count=$TOTAL_COUNT" >> $GITHUB_OUTPUT
-          echo "Root configs: $ROOT_CONFIGS"
-          echo "Total count: $TOTAL_COUNT"
+          echo "Root 配置: $ROOT_CONFIGS"
+          echo "总数: $TOTAL_COUNT"
 
   # ================================
-  # 2. 统一计算 release tag（matrix 共享）
+  # 2. 计算发布标签（由矩阵共享）
   # ================================
   prepare:
     needs: setup-matrix
@@ -99,7 +99,7 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      - name: 计算 release tag
+      - name: 生成发布标签
         id: tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -109,13 +109,13 @@ jobs:
           BASE_DATE=$(date -u +'%Y%m%d')
           COUNT=$(echo "$ROOT_CONFIGS" | jq length)
 
-          # ---------- 决定后缀 ----------
+          # ---------- 确定后缀 ----------
           if [ "$COUNT" -gt 1 ]; then
-            # 两个（或多个）管理器都构建 -> All
+            # 多个管理器 -> All
             SUFFIX="All"
           elif [ "$COUNT" -eq 1 ]; then
             R=$(echo "$ROOT_CONFIGS" | jq -r '.[0]')
-            # 只有 resukisu 且启用 susfs -> SUSFS
+            # 仅启用 ReSukiSU 和 SUSFS -> SUSFS
             if [ "$R" = "resukisu" ] && [ "$ENABLE_SUSFS" = "true" ]; then
               SUFFIX="SUSFS"
             else
@@ -125,7 +125,7 @@ jobs:
             SUFFIX="none"
           fi
 
-          # ---------- 从 1 开始找当天该后缀下第一个未占用的 N ----------
+          # ---------- 查找当天该后缀第一个未使用的 N ----------
           N=1
           while gh release view "${BASE_DATE}-${N}-${SUFFIX}" \
                   --repo "${{ github.repository }}" > /dev/null 2>&1; do
@@ -134,7 +134,7 @@ jobs:
           TAG="${BASE_DATE}-${N}-${SUFFIX}"
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "Release tag: ${TAG}"
+          echo "发布标签: ${TAG}"
 
   # ================================
   # 3. 矩阵构建
@@ -163,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 构建编译环境
+      - name: 设置构建环境
         run: |
           sudo apt-get update
           sudo -E apt-get -y -qq install \
@@ -173,11 +173,11 @@ jobs:
             binutils-arm-linux-gnueabi jq
           mkdir -p $GITHUB_WORKSPACE/kernel_workspace
 
-      - name: 下载 GCC 工具链（64位和32位）
+      - name: 下载 GCC 工具链（64 位和 32 位）
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
 
-          # 64位工具链
+          # 64 位工具链
           mkdir -p gcc64
           wget -O gcc-aarch64.tar.gz --tries=3 --timeout=30 \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz \
@@ -185,7 +185,7 @@ jobs:
             https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/aarch64-linux-android-4.9-refs_tags_android-12.1.0_r27.tar.gz
           tar -C gcc64/ -zxvf gcc-aarch64.tar.gz
 
-          # 32位工具链
+          # 32 位工具链
           mkdir -p gcc32
           wget -O gcc-arm.tar.gz --tries=3 --timeout=30 \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz \
@@ -193,7 +193,7 @@ jobs:
             https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/arm-linux-androideabi-4.9-refs_tags_android-12.1.0_r27.tar.gz
           tar -C gcc32/ -zxvf gcc-arm.tar.gz
 
-      - name: 下载 Clang 工具链（AOSP 版）
+      - name: 下载 Clang 工具链（AOSP）
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           mkdir clang-aosp
@@ -207,40 +207,40 @@ jobs:
           git clone -b "$BRANCH" \
             https://github.com/EnderPhantomWing/kernel_oppo_mt6833.git android-kernel
 
-      - name: 设置 ccache 缓存
+      - name: 设置 ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: build-kernel-mt6833-${{ matrix.root }}
           max-size: 2G
 
-      - name: KernelSU - 应用 legacy patch
+      - name: KernelSU - 应用旧版补丁
         if: matrix.root == 'kernelsu'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          echo "KSU_LOG: 下载并应用 RKSU 官方 4.14 patch"
+          echo "KSU_LOG: 下载并应用 RKSU 官方 4.14 补丁"
           wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
-          patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; exit 1; }
+          patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
 
-      - name: ReSukiSU - 应用 legacy patch
+      - name: ReSukiSU - 应用旧版补丁
         if: matrix.root == 'resukisu'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          echo "KSU_LOG: 下载并应用 ReSukiSU 官方 4.14 patch"
+          echo "KSU_LOG: 下载并应用 ReSukiSU 官方 4.14 补丁"
           wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch
-          patch -p1 < ksu-4.14.patch || { echo "patch 应用失败"; exit 1; }
+          patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
 
       - name: SUSFS - 启用 SUSFS
         if: env.ENABLE_SUSFS == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          echo "KSU_LOG: 开启 SUSFS"
+          echo "KSU_LOG: 启用 SUSFS"
           wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
-          patch -p1 -F 3 < susfs-4.14.patch || { echo "SUSFS patch 应用失败"; exit 1; }
+          patch -p1 -F 3 < susfs-4.14.patch || { echo "SUSFS 补丁应用失败"; exit 1; }
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
-            || { echo "SUSFS fdinfo 兼容修正失败"; exit 1; }
+            || { echo "SUSFS fdinfo 兼容性修复失败"; exit 1; }
 
-      - name: KernelSU - 植入核心代码
+      - name: KernelSU - 注入核心代码
         id: ksuinline
         if: matrix.root == 'kernelsu'
         run: |
@@ -256,7 +256,7 @@ jobs:
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash
 
-      - name: ReSukiSU - 植入核心代码 + SUSFS inline hooks
+      - name: ReSukiSU - 注入核心代码 + SUSFS 内联钩子
         id: resukisuinline
         if: matrix.root == 'resukisu'
         run: |
@@ -272,14 +272,14 @@ jobs:
           rm -rf KernelSU
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
           if [ "$ENABLE_SUSFS" = "true" ]; then
-            echo "KSU_LOG: 应用 ReSukiSU SUSFS inline hooks"
+            echo "KSU_LOG: 应用 ReSukiSU SUSFS 内联钩子"
             curl -LfsS \
               https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/susfs_inline_hook_patches.sh \
               -o susfs_inline_hook_patches.sh
             bash susfs_inline_hook_patches.sh
           fi
 
-      - name: LXC/Docker - 开启内核配置
+      - name: LXC/Docker - 启用内核配置
         if: env.ENABLE_LXC_DOCKER == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
@@ -294,7 +294,7 @@ jobs:
           sed -i '/CONFIG_MTK_TASK_TURBO/d' arch/arm64/configs/PFGM00_defconfig
           echo "# CONFIG_MTK_TASK_TURBO is not set" >> arch/arm64/configs/PFGM00_defconfig
 
-      - name: LXC/Docker - 打入 runc 补丁
+      - name: LXC/Docker - 应用 runc 补丁
         if: env.ENABLE_LXC_DOCKER == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
@@ -307,7 +307,7 @@ jobs:
             ./runcpatch.sh android-kernel/kernel/cgroup/cgroup.c
           fi
 
-      - name: LXC/Docker - 打入 xt_qtaguid 补丁
+      - name: LXC/Docker - 应用 xt_qtaguid 补丁
         if: env.ENABLE_LXC_DOCKER == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
@@ -316,14 +316,14 @@ jobs:
             patch -p0 < lxc.patch
           fi
 
-      - name: LXC/Docker - 关闭 ANDROID_PARANOID_NETWORK
+      - name: LXC/Docker - 禁用 ANDROID_PARANOID_NETWORK
         if: env.ENABLE_LXC_DOCKER == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' android-kernel/arch/arm64/configs/PFGM00_defconfig
           echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
 
-      - name: KVM - 开启配置
+      - name: KVM - 启用配置
         if: env.ENABLE_KVM == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
@@ -332,7 +332,7 @@ jobs:
           echo "CONFIG_VHOST_NET=y" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
           echo "CONFIG_VHOST_CROSS_ENDIAN_LEGACY=y" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
 
-      - name: 开始编译内核
+      - name: 开始构建内核
         id: build_kernel
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
@@ -355,7 +355,7 @@ jobs:
           make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
 
           if [ "$ENABLE_SUSFS" = "true" ]; then
-            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS（manual hook）"
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS（手动钩子）"
             ./scripts/config --file out/.config \
               --enable KSU \
               --enable KSU_SUSFS \
@@ -385,11 +385,12 @@ jobs:
             LD=ld.lld \
             KCFLAGS="$KCFLAGS_EXTRA"
 
-          KERNEL_VERSION=$(make O=out ARCH=arm64 kernelrelease)
+          # 修复：仅提取内核版本，去除 make 输出噪音
+          KERNEL_VERSION=$(make -s O=out ARCH=arm64 kernelrelease | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
           echo "KERNEL_VERSION=${KERNEL_VERSION}"
           echo "$KERNEL_VERSION" > "$GITHUB_WORKSPACE/kernel_workspace/kernel_version_${{ matrix.root }}.txt"
 
-      # ---------- 生成 artifact 名 ----------
+      # ---------- 生成产物名称 ----------
       - name: 创建 AK3 后缀
         id: gen_name
         run: |
@@ -398,14 +399,21 @@ jobs:
           else
             NAME="PFGM00-MT6833-RKSU"
           fi
+          # 按顺序添加后缀：Docker > KVM > SUSFS
+          if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
+            NAME="${NAME}-Docker"
+          fi
+          if [ "$ENABLE_KVM" = "true" ]; then
+            NAME="${NAME}-KVM"
+          fi
           if [ "$ENABLE_SUSFS" = "true" ]; then
             NAME="${NAME}-SUSFS"
           fi
           echo "artifact_name=${NAME}" >> $GITHUB_OUTPUT
-          echo "Artifact name: ${NAME}"
+          echo "产物名称: ${NAME}"
 
       # ---------- 打包 ----------
-      - name: 制作 AnyKernel3 包
+      - name: 构建 AnyKernel3 包
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           git clone https://github.com/EnderPhantomWing/AnyKernel3
@@ -419,7 +427,7 @@ jobs:
           (cd AnyKernel3 && zip -r9 "../${ZIP_NAME}" .)
           ls -lh "${ZIP_NAME}"
 
-      # ---------- 上传 artifacts ----------
+      # ---------- 上传产物 ----------
       - name: 上传版本信息
         uses: actions/upload-artifact@v4
         with:
@@ -435,7 +443,7 @@ jobs:
           name: ak3-${{ matrix.root }}
           path: kernel_workspace/${{ steps.gen_name.outputs.artifact_name }}.zip
 
-      - name: 重命名内核镜像（加 root 后缀）
+      - name: 重命名内核镜像（带 root 后缀）
         run: |
           SRC=kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz
           DST=kernel_workspace/Image-${{ matrix.root }}.gz
@@ -448,7 +456,7 @@ jobs:
           path: kernel_workspace/Image-${{ matrix.root }}.gz
 
   # ================================
-  # 4. 汇总发布（所有 matrix 完成后执行一次）
+  # 4. 摘要与发布（所有矩阵任务完成后运行一次）
   # ================================
   release:
     needs: [setup-matrix, prepare, build]
@@ -459,13 +467,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: 下载所有 artifacts
+      - name: 下载所有产物
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: 生成版本汇总
+      - name: 生成版本摘要
         id: version_summary
         run: |
           ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
@@ -473,34 +481,36 @@ jobs:
           for root in $(echo "$ROOT_CONFIGS" | jq -r '.[]'); do
             KV_FILE="artifacts/kernel_version_${root}.txt"
             MV_FILE="artifacts/manager_version_${root}.txt"
-            if [ -f "$KV_FILE" ]; then KV=$(cat "$KV_FILE"); else KV="unknown"; fi
-            if [ -f "$MV_FILE" ]; then MV=$(cat "$MV_FILE"); else MV="unknown"; fi
-            SUMMARY="${SUMMARY}${root}: kernel=${KV}, manager=${MV}\n"
+            if [ -f "$KV_FILE" ]; then KV=$(cat "$KV_FILE"); else KV="未知"; fi
+            if [ -f "$MV_FILE" ]; then MV=$(cat "$MV_FILE"); else MV="未知"; fi
+            SUMMARY="${SUMMARY}${root}: 内核=${KV}, 管理器=${MV}\n"
           done
           echo "summary<<EOF" >> "$GITHUB_OUTPUT"
           echo -e "$SUMMARY" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: 输出变量汇总到 Summary
+      - name: 将变量输出到摘要
         run: |
           ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
           ENABLE_SUSFS='${{ inputs.enable_susfs }}'
+          ENABLE_LXC_DOCKER='${{ inputs.enable_lxc_docker }}'
+          ENABLE_KVM='${{ inputs.enable_kvm }}'
           {
-            echo "### 构建变量汇总"
+            echo "### Build Variables Summary"
             echo ""
-            echo "| 变量 | 值 |"
+            echo "| Variable | Value |"
             echo "|------|-----|"
-            echo "| **分支 (branch)** | ${{ inputs.branch }} |"
-            echo "| **Root 配置 (root-configs)** | $ROOT_CONFIGS |"
-            echo "| **构建总数 (total-count)** | ${{ needs.setup-matrix.outputs.total-count }} |"
-            echo "| **Release Tag** | ${{ needs.prepare.outputs.tag }} |"
-            echo "| **启用 SUSFS** | ${{ inputs.enable_susfs }} |"
-            echo "| **启用 LXC/Docker** | ${{ inputs.enable_lxc_docker }} |"
-            echo "| **启用 KVM** | ${{ inputs.enable_kvm }} |"
+            echo "| **Branch** | ${{ inputs.branch }} |"
+            echo "| **Root Config** | $ROOT_CONFIGS |"
+            echo "| **Total** | ${{ needs.setup-matrix.outputs.total-count }} |"
+            echo "| **Publish Tag** | ${{ needs.prepare.outputs.tag }} |"
+            echo "| **Enable SUSFS** | ${{ inputs.enable_susfs }} |"
+            echo "| **Enable LXC/Docker** | ${{ inputs.enable_lxc_docker }} |"
+            echo "| **Enable KVM** | ${{ inputs.enable_kvm }} |"
             echo ""
-            echo "### 构建矩阵"
+            echo "### Build Matrix"
             echo ""
-            echo "| Root 类型 | Artifact 名称 | 内核版本 | 管理器版本 |"
+            echo "| Root Type | Artifact Name | Kernel Version | Root Manager Version |"
             echo "|-----------|---------------|----------|------------|"
             for root in $(echo "$ROOT_CONFIGS" | jq -r '.[]'); do
               if [ "$root" = "resukisu" ]; then
@@ -509,6 +519,13 @@ jobs:
                 NAME="PFGM00-MT6833-RKSU"
               else
                 NAME="PFGM00-MT6833-$root"
+              fi
+              # 按顺序添加后缀：Docker > KVM > SUSFS
+              if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
+                NAME="${NAME}-Docker"
+              fi
+              if [ "$ENABLE_KVM" = "true" ]; then
+                NAME="${NAME}-KVM"
               fi
               if [ "$ENABLE_SUSFS" = "true" ]; then
                 NAME="${NAME}-SUSFS"
@@ -520,30 +537,29 @@ jobs:
               echo "| $root | ak3-$root / ${NAME}.zip | $KV | $MV |"
             done
             echo ""
-            echo "### 环境信息"
+            echo "### Environment Infomation"
             echo ""
-            echo "| 变量 | 值 |"
+            echo "| Variable | Value |"
             echo "|------|-----|"
             echo "| **Commit SHA** | ${{ github.sha }} |"
-            echo "| **Run Number** | ${{ github.run_number }} |"
-            echo "| **工作流名称** | 编译内核 PFGM00-MT6833 |"
+            echo "| **Action Run Number** | ${{ github.run_number }} |"
+            echo "| **Action Name** | Build Kernel for PFGM00-MT6833 |"
           } >> $GITHUB_STEP_SUMMARY
 
-      - name: 列出下载的文件
+      - name: 列出已下载文件
         run: find artifacts -type f
 
-      - name: 创建 release 并上传
+      - name: 创建发布并上传
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: ${{ needs.prepare.outputs.tag }}
           body: |
-            Automated release for commit ${{ github.sha }} build ${{ github.run_number }}
+            Automated release
+            | Commit ${{ github.sha }} | Build #${{ github.run_number }} |
 
-            Kernel/Manager Version Summary:
+            Kernel / Manager Version Summary：
             ${{ steps.version_summary.outputs.summary }}
-
-            Root Driver Version Summary(null version infomation means unconstructed)
           files: |
             artifacts/*.zip
             artifacts/*.gz
