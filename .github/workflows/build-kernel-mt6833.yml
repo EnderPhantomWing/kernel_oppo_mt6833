@@ -43,7 +43,7 @@ on:
       branch:
         description: '选择要克隆的分支（仅限开发者）'
         required: true
-        default: '4.14.186'
+        default: 'main/4.14.186'
         type: choice
         options:
           - main/4.14.186
