@@ -1,0 +1,83 @@
+name: Nightly trigger
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1'
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
+    steps:
+      # ========== 第一批：全部 Root 管理器构建，4 个并行 ==========
+      - name: 并行触发第一批：全部 Root 管理器构建
+        run: |
+          set -euo pipefail
+
+          trigger() {
+            local desc="$1"
+            shift
+            echo "触发: ${desc}"
+            gh workflow run build-kernel-mt6833.yml \
+              --repo "${{ github.repository }}" \
+              "$@"
+          }
+
+          pids=()
+          trigger "全部 Root 管理器" \
+            -f enable_all_roots=true & pids+=("$!")
+          trigger "全部 Root 管理器 + LXC/Docker" \
+            -f enable_all_roots=true \
+            -f enable_lxc_docker=true & pids+=("$!")
+          trigger "全部 Root 管理器 + KVM" \
+            -f enable_all_roots=true \
+            -f enable_kvm=true & pids+=("$!")
+          trigger "全部 Root 管理器 + LXC/Docker + KVM" \
+            -f enable_all_roots=true \
+            -f enable_lxc_docker=true \
+            -f enable_kvm=true & pids+=("$!")
+
+          for pid in "${pids[@]}"; do
+            wait "$pid"
+          done
+
+      - name: 等待第一批 workflow 初始化
+        run: sleep 1500
+
+      # ========== 第二批：ReSukiSU + SUSFS 管理器构建，4 个并行 ==========
+      - name: 并行触发第二批：ReSukiSU + SUSFS 构建
+        run: |
+          set -euo pipefail
+
+          trigger() {
+            local desc="$1"
+            shift
+            echo "触发: ${desc}"
+            gh workflow run build-kernel-mt6833.yml \
+              --repo "${{ github.repository }}" \
+              "$@"
+          }
+
+          pids=()
+          trigger "ReSukiSU + SUSFS" \
+            -f enable_resukisu=true \
+            -f enable_susfs=true & pids+=("$!")
+          trigger "ReSukiSU + LXC/Docker + SUSFS" \
+            -f enable_resukisu=true \
+            -f enable_lxc_docker=true \
+            -f enable_susfs=true & pids+=("$!")
+          trigger "ReSukiSU + KVM + SUSFS" \
+            -f enable_resukisu=true \
+            -f enable_kvm=true \
+            -f enable_susfs=true & pids+=("$!")
+          trigger "ReSukiSU + LXC/Docker + KVM + SUSFS" \
+            -f enable_resukisu=true \
+            -f enable_lxc_docker=true \
+            -f enable_kvm=true \
+            -f enable_susfs=true & pids+=("$!")
+
+          for pid in "${pids[@]}"; do
+            wait "$pid"
+          done
