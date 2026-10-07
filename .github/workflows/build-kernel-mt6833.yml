@@ -47,6 +47,7 @@ on:
         type: choice
         options:
           - main/4.14.186
+          - main/bpf/4.14.186-2
 
 jobs:
   # ================================
