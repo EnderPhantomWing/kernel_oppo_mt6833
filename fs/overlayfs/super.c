@@ -738,6 +738,9 @@ __ovl_posix_acl_xattr_get(const struct xattr_handler *handler,
 			  struct dentry *dentry, struct inode *inode,
 			  const char *name, void *buffer, size_t size)
 {
+	if (unlikely(!dentry->d_fsdata))
+		return -ENODATA;
+
 	return __ovl_xattr_get(dentry, inode, handler->name, buffer, size);
 }
 
@@ -825,6 +828,15 @@ static int __ovl_other_xattr_get(const struct xattr_handler *handler,
 				 struct dentry *dentry, struct inode *inode,
 				 const char *name, void *buffer, size_t size)
 {
+	/*
+	 * This __get fast path bypasses the NoMount s_xattr proxy layer
+	 * entirely. A foreign (fabricated) inode on this overlay sb hits
+	 * here with d_fsdata == NULL; let __ovl_xattr_get() cope with it
+	 * instead of dereferencing ovl_entry(NULL)->lowerstack.
+	 */
+	if (unlikely(!dentry->d_fsdata))
+		return -ENODATA;
+	
 	return __ovl_xattr_get(dentry, inode, name, buffer, size);
 }
 

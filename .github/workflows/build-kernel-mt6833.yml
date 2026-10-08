@@ -26,8 +26,8 @@ on:
         required: false
         default: false
         type: boolean
-      enable_hybird:
-        description: '启用 Hybird Mount VFS 挂载'
+      enable_nomount:
+        description: '启用 NoMount VFS 挂载'
         required: false
         default: false
         type: boolean
@@ -110,6 +110,7 @@ jobs:
         env:
           ROOT_CONFIGS: ${{ needs.setup-matrix.outputs.root-configs }}
           ENABLE_SUSFS: ${{ inputs.enable_susfs }}
+          ENABLE_NOMOUNT: ${{ inputs.enable_nomount }}
           ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
           ENABLE_KVM: ${{ inputs.enable_kvm }}
           RUN_NUMBER: ${{ github.run_number }}
@@ -126,7 +127,7 @@ jobs:
             BASE="none"
           fi
 
-          # ---------- 按顺序添加后缀：Docker > KVM > SUSFS ----------
+          # ---------- 按顺序添加后缀：Docker > KVM > SUSFS > NoMount ----------
           SUFFIX="$BASE"
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
             SUFFIX="${SUFFIX}-Docker"
@@ -136,6 +137,9 @@ jobs:
           fi
           if [ "$ENABLE_SUSFS" = "true" ]; then
             SUFFIX="${SUFFIX}-SUSFS"
+          fi
+          if [ "$ENABLE_NOMOUNT" = "true" ]; then
+            SUFFIX="${SUFFIX}-NoMount"
           fi
 
           # ---------- 追加 build.{buildNumber} ----------
@@ -161,7 +165,7 @@ jobs:
       ROOT_TYPE: ${{ matrix.root }}
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
       ENABLE_SUSFS: ${{ inputs.enable_susfs }}
-      ENABLE_HYBIRD: ${{ inputs.enable_hybird }}
+      ENABLE_NOMOUNT: ${{ inputs.enable_nomount }}
       ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
       ENABLE_KVM: ${{ inputs.enable_kvm }}
       BRANCH: ${{ inputs.branch }}
@@ -182,7 +186,7 @@ jobs:
             binutils-arm-linux-gnueabi jq
           mkdir -p $GITHUB_WORKSPACE/kernel_workspace
 
-      - name: 下载 GCC 工具链（64 位和 32 位）
+      - name: 下载 GCC 工具链 (64 位和 32 位)
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
 
@@ -249,16 +253,16 @@ jobs:
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
             || { echo "SUSFS fdinfo 兼容性修复失败"; exit 1; }
 
-      - name: Hybird Mount - 启用 VFS 挂载
-        if: env.ENABLE_HYBIRD == 'true'
+      - name: NoMount - 启用 VFS 挂载
+        if: env.ENABLE_NOMOUNT == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          echo "KSU_LOG: 启用 Hybird Mount VFS 挂载"
+          echo "KSU_LOG: 启用 NoMount VFS 挂载"
           curl -LfsS \
-            https://raw.githubusercontent.com/Hybrid-Mount/meta-hybrid_mount/dev/module/vfs/setup.sh \
-            -o hybird-setup.sh \
+            https://raw.githubusercontent.com/maxsteeel/nomount/refs/heads/dev/kernel/setup.sh \
+            -o nomount-setup.sh \
             || { echo "下载 NoMount setup 脚本失败"; exit 1; }
-          bash hybird-setup.sh
+          bash nomount-setup.sh dev
 
       - name: KernelSU - 注入核心代码
         id: ksuinline
@@ -397,14 +401,14 @@ jobs:
               --disable KSU_TRACEPOINT_HOOK
           fi
 
-          if [ "$ENABLE_HYBIRD" = "true" ]; then
-            echo "KSU_LOG: 启用 Hybird Mount VFS 挂载"
+          if [ "$ENABLE_NOMOUNT" = "true" ]; then
+            echo "KSU_LOG: 启用 NoMount VFS 挂载"
             ./scripts/config --file out/.config \
-              --enable CONFIG_HYBRIDMOUNT \
+              --enable CONFIG_NOMOUNT \
               --enable CONFIG_KEYS
           else
-            echo "不启用 Hybird Mount VFS 挂载"
-            ./scripts/config --file out/.config --disable CONFIG_HYBRIDMOUNT
+            echo "不启用 NoMount VFS 挂载"
+            ./scripts/config --file out/.config --disable CONFIG_NOMOUNT
           fi
 
           ./scripts/config --file out/.config \
@@ -415,6 +419,16 @@ jobs:
             --enable SECTION_MISMATCH_WARN_ONLY
 
           make O=out ARCH=arm64 olddefconfig
+
+          if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
+            grep -qx 'CONFIG_NOMOUNT=y' out/.config \
+              && grep -qx 'CONFIG_KEYS=y' out/.config \
+              || { echo "NoMount 或 CONFIG_KEYS 配置未生效，终止编译"; exit 1; }
+          elif grep -Eq '^CONFIG_NOMOUNT=(y|m)$' out/.config; then
+            echo "NoMount 未关闭，终止编译"
+            exit 1
+          fi
+
           make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
@@ -436,7 +450,7 @@ jobs:
           else
             NAME="PFGM00-MT6833-RKSU"
           fi
-          # 按顺序添加后缀: Docker > KVM > SUSFS > Hybird Mount
+          # 按顺序添加后缀: Docker > KVM > SUSFS > NoMount
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
             NAME="${NAME}-Docker"
           fi
@@ -446,8 +460,8 @@ jobs:
           if [ "$ENABLE_SUSFS" = "true" ]; then
             NAME="${NAME}-SUSFS"
           fi
-          if [ "$ENABLE_HYBIRD" = "true" ]; then
-            NAME="${NAME}-HybirdMount"
+          if [ "$ENABLE_NOMOUNT" = "true" ]; then
+            NAME="${NAME}-NoMount"
           fi
           echo "artifact_name=${NAME}" >> $GITHUB_OUTPUT
           echo "产物名称: ${NAME}"
@@ -534,6 +548,7 @@ jobs:
         run: |
           ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
           ENABLE_SUSFS='${{ inputs.enable_susfs }}'
+          ENABLE_NOMOUNT='${{ inputs.enable_nomount }}'
           ENABLE_LXC_DOCKER='${{ inputs.enable_lxc_docker }}'
           ENABLE_KVM='${{ inputs.enable_kvm }}'
           {
@@ -546,7 +561,7 @@ jobs:
             echo "| **Total** | ${{ needs.setup-matrix.outputs.total-count }} |"
             echo "| **Publish Tag** | ${{ needs.prepare.outputs.tag }} |"
             echo "| **Enable SUSFS** | ${{ inputs.enable_susfs }} |"
-            echo "| **Enable HybirdMount** | ${{ inputs.enable_hybird }} |"
+            echo "| **Enable NoMount** | ${{ inputs.enable_nomount }} |"
             echo "| **Enable LXC/Docker** | ${{ inputs.enable_lxc_docker }} |"
             echo "| **Enable KVM** | ${{ inputs.enable_kvm }} |"
             echo ""
@@ -562,7 +577,7 @@ jobs:
               else
                 NAME="PFGM00-MT6833-$root"
               fi
-              # 按顺序添加后缀：Docker > KVM > SUSFS > HybirdMount
+              # 按顺序添加后缀：Docker > KVM > SUSFS > NoMount
               if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
                 NAME="${NAME}-Docker"
               fi
@@ -572,8 +587,8 @@ jobs:
               if [ "$ENABLE_SUSFS" = "true" ]; then
                 NAME="${NAME}-SUSFS"
               fi
-              if [ "$ENABLE_HYBIRD" = "true" ]; then
-                NAME="${NAME}-HybirdMount"
+              if [ "$ENABLE_NOMOUNT" = "true" ]; then
+                NAME="${NAME}-NoMount"
               fi
               KV_FILE="artifacts/kernel_version_${root}.txt"
               MV_FILE="artifacts/manager_version_${root}.txt"
@@ -602,7 +617,7 @@ jobs:
             echo "| **Total** | ${{ needs.setup-matrix.outputs.total-count }} |"
             echo "| **Publish Tag** | ${{ needs.prepare.outputs.tag }} |"
             echo "| **Enable SUSFS** | ${{ inputs.enable_susfs }} |"
-            echo "| **Enable HybirdMount** | ${{ inputs.enable_hybird }} |"
+            echo "| **Enable NoMount** | ${{ inputs.enable_nomount }} |"
             echo "| **Enable LXC/Docker** | ${{ inputs.enable_lxc_docker }} |"
             echo "| **Enable KVM** | ${{ inputs.enable_kvm }} |"
             echo ""
@@ -628,7 +643,7 @@ jobs:
             Automated release
             | Commit ${{ github.sha }} | Build #${{ github.run_number }} |
 
-            Kernel / Manager Version Summary：
+            Kernel / Manager Version Summary: 
             ${{ steps.version_summary.outputs.summary }}
 
             ${{ steps.output_summary.outputs.summary_release }}

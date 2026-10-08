@@ -252,6 +252,17 @@ int __ovl_xattr_get(struct dentry *dentry, struct inode *inode,
 	struct dentry *realdentry =
 		ovl_i_dentry_upper(inode) ?: ovl_dentry_lower(dentry);
 
+	if (unlikely(!realdentry)) {
+		/*
+		 * Foreign inode on this overlay sb has neither an upper
+		 * dentry nor a valid ovl_entry behind dentry->d_fsdata.
+		 * Report "no data" so callers like SELinux
+		 * inode_doinit_with_dentry() fall back to the default
+		 * label instead of dereferencing NULL.
+		 */
+		return -ENODATA;
+	}
+
 	old_cred = ovl_override_creds(dentry->d_sb);
 	res = __vfs_getxattr(realdentry, d_inode(realdentry), name, value,
 			     size);
@@ -266,6 +277,9 @@ int ovl_xattr_get(struct dentry *dentry, struct inode *inode, const char *name,
 	const struct cred *old_cred;
 	struct dentry *realdentry =
 		ovl_i_dentry_upper(inode) ?: ovl_dentry_lower(dentry);
+
+	if (unlikely(!realdentry))
+		return -ENODATA;
 
 	old_cred = ovl_override_creds(dentry->d_sb);
 	res = vfs_getxattr(realdentry, name, value, size);
