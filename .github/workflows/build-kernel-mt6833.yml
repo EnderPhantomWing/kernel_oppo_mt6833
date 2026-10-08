@@ -258,7 +258,7 @@ jobs:
             https://raw.githubusercontent.com/Hybrid-Mount/meta-hybrid_mount/dev/module/vfs/setup.sh \
             -o hybird-setup.sh \
             || { echo "下载 NoMount setup 脚本失败"; exit 1; }
-          bash hybird-setup.sh dev
+          bash hybird-setup.sh
 
       - name: KernelSU - 注入核心代码
         id: ksuinline
