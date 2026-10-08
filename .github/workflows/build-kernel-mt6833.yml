@@ -20,9 +20,14 @@ on:
         default: false
         type: boolean
 
-      # ========== 通用功能 ==========
+      # ========== 扩展功能 ==========
       enable_susfs:
         description: '启用 SUSFS'
+        required: false
+        default: false
+        type: boolean
+      enable_bbr:
+        description: "启用 BBR 加速"
         required: false
         default: false
         type: boolean
@@ -31,8 +36,6 @@ on:
         required: false
         default: false
         type: boolean
-
-      # ========== 扩展功能 ==========
       enable_lxc_docker:
         description: '启用 LXC / Docker 支持 (需要 KernelSU)'
         required: false
@@ -111,6 +114,7 @@ jobs:
           ROOT_CONFIGS: ${{ needs.setup-matrix.outputs.root-configs }}
           ENABLE_SUSFS: ${{ inputs.enable_susfs }}
           ENABLE_NOMOUNT: ${{ inputs.enable_nomount }}
+          ENABLE_BBR: ${{ inputs.enable_bbr }}
           ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
           ENABLE_KVM: ${{ inputs.enable_kvm }}
           RUN_NUMBER: ${{ github.run_number }}
@@ -127,13 +131,16 @@ jobs:
             BASE="none"
           fi
 
-          # ---------- 按顺序添加后缀：Docker > KVM > SUSFS > NoMount ----------
+          # ---------- 按顺序添加后缀: Docker > KVM > BBR > SUSFS > NoMount ----------
           SUFFIX="$BASE"
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
             SUFFIX="${SUFFIX}-Docker"
           fi
           if [ "$ENABLE_KVM" = "true" ]; then
             SUFFIX="${SUFFIX}-KVM"
+          fi
+          if [ "$ENABLE_BBR" = "true" ]; then
+            SUFFIX="${SUFFIX}-BBR"
           fi
           if [ "$ENABLE_SUSFS" = "true" ]; then
             SUFFIX="${SUFFIX}-SUSFS"
@@ -166,6 +173,7 @@ jobs:
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
       ENABLE_SUSFS: ${{ inputs.enable_susfs }}
       ENABLE_NOMOUNT: ${{ inputs.enable_nomount }}
+      ENABLE_BBR: ${{ inputs.enable_bbr }}
       ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
       ENABLE_KVM: ${{ inputs.enable_kvm }}
       BRANCH: ${{ inputs.branch }}
@@ -379,6 +387,17 @@ jobs:
 
           make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
 
+          # BBR
+          if [ "$ENABLE_BBR" = "true" ]; then
+            echo "启用 BBR..."
+            ./scripts/config --file out/.config \
+              --enable CONFIG_TCP_CONG_BBR \
+              --enable CONFIG_NET_SCH_FQ
+            make O=out olddefconfig
+          else
+            echo "不启用 BBR..."
+          fi
+
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
             KCFLAGS_EXTRA="-Wno-error=sizeof-array-div"
           else
@@ -420,7 +439,7 @@ jobs:
 
           make O=out ARCH=arm64 olddefconfig
 
-          if [ "${{ github.event.inputs.nomount }}" = "true" ]; then
+          if [ "$ENABLE_NOMOUNT" = "true" ]; then
             grep -qx 'CONFIG_NOMOUNT=y' out/.config \
               && grep -qx 'CONFIG_KEYS=y' out/.config \
               || { echo "NoMount 或 CONFIG_KEYS 配置未生效，终止编译"; exit 1; }
@@ -450,12 +469,15 @@ jobs:
           else
             NAME="PFGM00-MT6833-RKSU"
           fi
-          # 按顺序添加后缀: Docker > KVM > SUSFS > NoMount
+          # 按顺序添加后缀: Docker > KVM > BBR > SUSFS > NoMount
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
             NAME="${NAME}-Docker"
           fi
           if [ "$ENABLE_KVM" = "true" ]; then
             NAME="${NAME}-KVM"
+          fi
+          if [ "$ENABLE_BBR" = "true" ]; then
+            NAME="${NAME}-BBR"
           fi
           if [ "$ENABLE_SUSFS" = "true" ]; then
             NAME="${NAME}-SUSFS"
@@ -549,6 +571,7 @@ jobs:
           ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
           ENABLE_SUSFS='${{ inputs.enable_susfs }}'
           ENABLE_NOMOUNT='${{ inputs.enable_nomount }}'
+          ENABLE_BBR='${{ inputs.enable_bbr }}'
           ENABLE_LXC_DOCKER='${{ inputs.enable_lxc_docker }}'
           ENABLE_KVM='${{ inputs.enable_kvm }}'
           {
@@ -562,6 +585,7 @@ jobs:
             echo "| **Publish Tag** | ${{ needs.prepare.outputs.tag }} |"
             echo "| **Enable SUSFS** | ${{ inputs.enable_susfs }} |"
             echo "| **Enable NoMount** | ${{ inputs.enable_nomount }} |"
+            echo "| **Enable BBR** | ${{ inputs.enable_bbr }} |"
             echo "| **Enable LXC/Docker** | ${{ inputs.enable_lxc_docker }} |"
             echo "| **Enable KVM** | ${{ inputs.enable_kvm }} |"
             echo ""
@@ -577,12 +601,15 @@ jobs:
               else
                 NAME="PFGM00-MT6833-$root"
               fi
-              # 按顺序添加后缀：Docker > KVM > SUSFS > NoMount
+              # 按顺序添加后缀: Docker > KVM > BBR > SUSFS > NoMount
               if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
                 NAME="${NAME}-Docker"
               fi
               if [ "$ENABLE_KVM" = "true" ]; then
                 NAME="${NAME}-KVM"
+              fi
+              if [ "$ENABLE_BBR" = "true" ]; then
+                NAME="${NAME}-BBR"
               fi
               if [ "$ENABLE_SUSFS" = "true" ]; then
                 NAME="${NAME}-SUSFS"
@@ -618,6 +645,7 @@ jobs:
             echo "| **Publish Tag** | ${{ needs.prepare.outputs.tag }} |"
             echo "| **Enable SUSFS** | ${{ inputs.enable_susfs }} |"
             echo "| **Enable NoMount** | ${{ inputs.enable_nomount }} |"
+            echo "| **Enable BBR** | ${{ inputs.enable_bbr }} |"
             echo "| **Enable LXC/Docker** | ${{ inputs.enable_lxc_docker }} |"
             echo "| **Enable KVM** | ${{ inputs.enable_kvm }} |"
             echo ""
