@@ -56,6 +56,7 @@ on:
         options:
           - main/4.14.186
           - main/bpf/4.14.186-2
+          - deprecated/bpf/4.14.186
 
 jobs:
   # ================================
