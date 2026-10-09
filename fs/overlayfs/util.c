@@ -139,7 +139,7 @@ void ovl_path_lower(struct dentry *dentry, struct path *path)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
 
-	*path = oe->numlower ? oe->lowerstack[0] : (struct path) { };
+	*path = (oe && oe->numlower) ? oe->lowerstack[0] : (struct path) { };
 }
 
 enum ovl_path_type ovl_path_real(struct dentry *dentry, struct path *path)
@@ -162,6 +162,19 @@ struct dentry *ovl_dentry_upper(struct dentry *dentry)
 struct dentry *ovl_dentry_lower(struct dentry *dentry)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
+
+	if (unlikely(!oe)) {
+		/*
+		 * Foreign inode spliced onto this overlay sb (e.g. a NoMount
+		 * fabricated inode from new_inode(sb) + d_splice_alias())
+		 * never went through ovl_lookup(), so d_fsdata is NULL.
+		 * Degrade gracefully instead of oopsing.
+		 */
+		pr_warn_ratelimited("ovl_dentry_lower: NULL d_fsdata dentry=%pd4 sb=%s magic=%lx\n",
+				    dentry, dentry->d_sb->s_id,
+				    dentry->d_sb->s_magic);
+		return NULL;
+	}
 
 	return oe->numlower ? oe->lowerstack[0].dentry : NULL;
 }

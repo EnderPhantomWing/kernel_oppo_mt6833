@@ -653,8 +653,17 @@ static void htab_elem_free_rcu(struct rcu_head *head)
 	preempt_disable();
 	__this_cpu_inc(bpf_prog_active);
 	htab_elem_free(htab, l);
-	__this_cpu_dec(bpf_prog_active);
-	preempt_enable();
+}
+
+static void htab_put_fd_value(struct bpf_htab *htab, struct htab_elem *l)
+{
+	struct bpf_map *map = &htab->map;
+	void *ptr;
+
+	if (map->ops->map_fd_put_ptr) {
+		ptr = fd_htab_map_get_ptr(map, l);
+		map->ops->map_fd_put_ptr(ptr);
+	}
 }
 
 static void free_htab_elem(struct bpf_htab *htab, struct htab_elem *l)
