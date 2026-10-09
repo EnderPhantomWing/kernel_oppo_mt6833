@@ -546,7 +546,6 @@ CONFIG_CRYPTO_TWOFISH=y
 # CONFIG_CRYPTO_HW is not set
 CONFIG_CRC8=y
 
-# ------------------------Other Settings-------------------------------
 # ReSukiSU
 CONFIG_KSU=y
 CONFIG_KSU_MANUAL_HOOK=y
@@ -579,5 +578,3 @@ CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
 CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
 CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 CONFIG_KSU_SUSFS_SUS_MAP=y
-
-# LXC/Docker and KVM config will add at action running

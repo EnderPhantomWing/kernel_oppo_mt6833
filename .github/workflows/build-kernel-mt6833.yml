@@ -15,29 +15,21 @@ on:
         default: false
         type: boolean
       enable_resukisu:
-        description: '启用 BakaSU (原ReSukiSU) 支持'
+        description: '启用 ReSukiSU 支持'
         required: false
         default: false
         type: boolean
 
-      # ========== 扩展功能 ==========
+      # ========== 通用功能 ==========
       enable_susfs:
         description: '启用 SUSFS'
         required: false
         default: false
         type: boolean
-      enable_bbr:
-        description: "启用 BBR 加速"
-        required: false
-        default: false
-        type: boolean
-      enable_nomount:
-        description: '启用 NoMount VFS 挂载'
-        required: false
-        default: false
-        type: boolean
+
+      # ========== 扩展功能 ==========
       enable_lxc_docker:
-        description: '启用 LXC / Docker 支持 (需要 KernelSU)'
+        description: '启用 LXC / Docker 支持（需要 KernelSU）'
         required: false
         default: false
         type: boolean
@@ -55,7 +47,6 @@ on:
         type: choice
         options:
           - main/4.14.186
-          - main/bpf/4.14.186-2
 
 jobs:
   # ================================
@@ -113,8 +104,6 @@ jobs:
         env:
           ROOT_CONFIGS: ${{ needs.setup-matrix.outputs.root-configs }}
           ENABLE_SUSFS: ${{ inputs.enable_susfs }}
-          ENABLE_NOMOUNT: ${{ inputs.enable_nomount }}
-          ENABLE_BBR: ${{ inputs.enable_bbr }}
           ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
           ENABLE_KVM: ${{ inputs.enable_kvm }}
           RUN_NUMBER: ${{ github.run_number }}
@@ -131,7 +120,7 @@ jobs:
             BASE="none"
           fi
 
-          # ---------- 按顺序添加后缀: Docker > KVM > BBR > SUSFS > NoMount ----------
+          # ---------- 按顺序添加后缀：Docker > KVM > SUSFS ----------
           SUFFIX="$BASE"
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
             SUFFIX="${SUFFIX}-Docker"
@@ -139,14 +128,8 @@ jobs:
           if [ "$ENABLE_KVM" = "true" ]; then
             SUFFIX="${SUFFIX}-KVM"
           fi
-          if [ "$ENABLE_BBR" = "true" ]; then
-            SUFFIX="${SUFFIX}-BBR"
-          fi
           if [ "$ENABLE_SUSFS" = "true" ]; then
             SUFFIX="${SUFFIX}-SUSFS"
-          fi
-          if [ "$ENABLE_NOMOUNT" = "true" ]; then
-            SUFFIX="${SUFFIX}-NoMount"
           fi
 
           # ---------- 追加 build.{buildNumber} ----------
@@ -172,8 +155,6 @@ jobs:
       ROOT_TYPE: ${{ matrix.root }}
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
       ENABLE_SUSFS: ${{ inputs.enable_susfs }}
-      ENABLE_NOMOUNT: ${{ inputs.enable_nomount }}
-      ENABLE_BBR: ${{ inputs.enable_bbr }}
       ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
       ENABLE_KVM: ${{ inputs.enable_kvm }}
       BRANCH: ${{ inputs.branch }}
@@ -194,7 +175,7 @@ jobs:
             binutils-arm-linux-gnueabi jq
           mkdir -p $GITHUB_WORKSPACE/kernel_workspace
 
-      - name: 下载 GCC 工具链 (64 位和 32 位)
+      - name: 下载 GCC 工具链（64 位和 32 位）
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
 
@@ -214,7 +195,7 @@ jobs:
             https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/arm-linux-androideabi-4.9-refs_tags_android-12.1.0_r27.tar.gz
           tar -C gcc32/ -zxvf gcc-arm.tar.gz
 
-      - name: 下载 Clang 工具链 (AOSP)
+      - name: 下载 Clang 工具链（AOSP）
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           mkdir clang-aosp
@@ -222,7 +203,7 @@ jobs:
             https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 \
             -b 10.0 clang-aosp
 
-      - name: 下载内核源码 (指定分支)
+      - name: 下载内核源码（指定分支）
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           git clone -b "$BRANCH" \
@@ -242,11 +223,11 @@ jobs:
           wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
           patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
 
-      - name: BakaSU (ReSukiSU) - 应用旧版补丁
+      - name: ReSukiSU - 应用旧版补丁
         if: matrix.root == 'resukisu'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          echo "KSU_LOG: 下载并应用 BakaSU (ReSukiSU) 官方 4.14 补丁"
+          echo "KSU_LOG: 下载并应用 ReSukiSU 官方 4.14 补丁"
           wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch
           patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
 
@@ -260,17 +241,6 @@ jobs:
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
             || { echo "SUSFS fdinfo 兼容性修复失败"; exit 1; }
-
-      - name: NoMount - 启用 VFS 挂载
-        if: env.ENABLE_NOMOUNT == 'true'
-        run: |
-          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          echo "KSU_LOG: 启用 NoMount VFS 挂载"
-          curl -LfsS \
-            https://raw.githubusercontent.com/maxsteeel/nomount/refs/heads/dev/kernel/setup.sh \
-            -o nomount-setup.sh \
-            || { echo "下载 NoMount setup 脚本失败"; exit 1; }
-          bash nomount-setup.sh dev
 
       - name: KernelSU - 注入核心代码
         id: ksuinline
@@ -295,12 +265,12 @@ jobs:
             bash susfs_inline_hook_patches.sh
           fi
 
-      - name: BakaSU (ReSukiSU) - 注入核心代码 + SUSFS 内联钩子
+      - name: ReSukiSU - 注入核心代码 + SUSFS 内联钩子
         id: resukisuinline
         if: matrix.root == 'resukisu'
         run: |
-          git clone --bare https://github.com/Baka-SU/BakaSU.git
-          cd BakaSU.git
+          git clone --bare https://github.com/ReSukiSU/ReSukiSU.git
+          cd ReSukiSU.git
           COUNT=$(git rev-list --count HEAD)
           RESUKISU_MANAGER_VERSION_CODE=$((30000 + COUNT + 700))
           echo "resukisu_manager_version_code=$RESUKISU_MANAGER_VERSION_CODE"
@@ -309,9 +279,9 @@ jobs:
 
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
-          curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
           if [ "$ENABLE_SUSFS" = "true" ]; then
-            echo "KSU_LOG: 应用 BakaSU (ReSukiSU) SUSFS 内联钩子"
+            echo "KSU_LOG: 应用 ReSukiSU SUSFS 内联钩子"
             curl -LfsS \
               https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/susfs_inline_hook_patches.sh \
               -o susfs_inline_hook_patches.sh
@@ -322,7 +292,7 @@ jobs:
         if: env.ENABLE_LXC_DOCKER == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
-          wget https://github.com/wu17481748/android-lxc-docker/releases/download/lxc-docker-2config/LXC-DOCKER-OPEN-CONFIG.sh
+          wget https://github.com/wu17481748/lxc-docker/releases/download/lxc-docker-2config/LXC-DOCKER-OPEN-CONFIG.sh
           chmod +x LXC-DOCKER-OPEN-CONFIG.sh
           ./LXC-DOCKER-OPEN-CONFIG.sh android-kernel/arch/arm64/configs/PFGM00_defconfig -w
 
@@ -351,8 +321,8 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           if [ -f android-kernel/net/netfilter/xt_qtaguid.c ]; then
-            wget https://raw.githubusercontent.com/wu17481748/android-lxc-docker/refs/heads/main/xt_qtaguid.patch
-            patch -p0 < xt_qtaguid.patch
+            wget https://github.com/wu17481748/lxc-docker/releases/download/lxc/lxc.patch
+            patch -p0 < lxc.patch
           fi
 
       - name: LXC/Docker - 禁用 ANDROID_PARANOID_NETWORK
@@ -385,49 +355,28 @@ jobs:
           export LOCALVERSION="-g${COMMIT_SHORT}-${RUN_NUMBER}-${BUILD_TIME}"
           echo "LOCALVERSION=${LOCALVERSION}"
 
-          make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
-
-          # BBR
-          if [ "$ENABLE_BBR" = "true" ]; then
-            echo "启用 BBR..."
-            ./scripts/config --file out/.config \
-              --enable CONFIG_TCP_CONG_BBR \
-              --enable CONFIG_NET_SCH_FQ
-            make O=out olddefconfig
-          else
-            echo "不启用 BBR..."
-          fi
-
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
             KCFLAGS_EXTRA="-Wno-error=sizeof-array-div"
           else
             KCFLAGS_EXTRA=""
           fi
 
+          make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
+
           if [ "$ENABLE_SUSFS" = "true" ]; then
-            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS (手动钩子)"
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS（手动钩子）"
             ./scripts/config --file out/.config \
               --enable KSU \
               --enable KSU_SUSFS \
               --enable KSU_MANUAL_HOOK \
               --disable KSU_TRACEPOINT_HOOK
           else
-            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK (无 SUSFS)"
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK（无 SUSFS）"
             ./scripts/config --file out/.config \
               --enable KSU \
               --enable KSU_MANUAL_HOOK \
               --disable KSU_SUSFS \
               --disable KSU_TRACEPOINT_HOOK
-          fi
-
-          if [ "$ENABLE_NOMOUNT" = "true" ]; then
-            echo "KSU_LOG: 启用 NoMount VFS 挂载"
-            ./scripts/config --file out/.config \
-              --enable CONFIG_NOMOUNT \
-              --enable CONFIG_KEYS
-          else
-            echo "不启用 NoMount VFS 挂载"
-            ./scripts/config --file out/.config --disable CONFIG_NOMOUNT
           fi
 
           ./scripts/config --file out/.config \
@@ -438,16 +387,6 @@ jobs:
             --enable SECTION_MISMATCH_WARN_ONLY
 
           make O=out ARCH=arm64 olddefconfig
-
-          if [ "$ENABLE_NOMOUNT" = "true" ]; then
-            grep -qx 'CONFIG_NOMOUNT=y' out/.config \
-              && grep -qx 'CONFIG_KEYS=y' out/.config \
-              || { echo "NoMount 或 CONFIG_KEYS 配置未生效，终止编译"; exit 1; }
-          elif grep -Eq '^CONFIG_NOMOUNT=(y|m)$' out/.config; then
-            echo "NoMount 未关闭，终止编译"
-            exit 1
-          fi
-
           make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
@@ -465,25 +404,19 @@ jobs:
         id: gen_name
         run: |
           if [ "${{ matrix.root }}" = "resukisu" ]; then
-            NAME="PFGM00-MT6833-BakaSU"
+            NAME="PFGM00-MT6833-ReSukiSU"
           else
             NAME="PFGM00-MT6833-RKSU"
           fi
-          # 按顺序添加后缀: Docker > KVM > BBR > SUSFS > NoMount
+          # 按顺序添加后缀：Docker > KVM > SUSFS
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
             NAME="${NAME}-Docker"
           fi
           if [ "$ENABLE_KVM" = "true" ]; then
             NAME="${NAME}-KVM"
           fi
-          if [ "$ENABLE_BBR" = "true" ]; then
-            NAME="${NAME}-BBR"
-          fi
           if [ "$ENABLE_SUSFS" = "true" ]; then
             NAME="${NAME}-SUSFS"
-          fi
-          if [ "$ENABLE_NOMOUNT" = "true" ]; then
-            NAME="${NAME}-NoMount"
           fi
           echo "artifact_name=${NAME}" >> $GITHUB_OUTPUT
           echo "产物名称: ${NAME}"
@@ -559,19 +492,16 @@ jobs:
             MV_FILE="artifacts/manager_version_${root}.txt"
             if [ -f "$KV_FILE" ]; then KV=$(cat "$KV_FILE"); else KV="未知"; fi
             if [ -f "$MV_FILE" ]; then MV=$(cat "$MV_FILE"); else MV="未知"; fi
-            SUMMARY="${SUMMARY}${root}: Kernel=${KV}, Manager=${MV}\n"
+            SUMMARY="${SUMMARY}${root}: 内核=${KV}, 管理器=${MV}\n"
           done
           echo "summary<<EOF" >> "$GITHUB_OUTPUT"
           echo -e "$SUMMARY" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: 将变量输出到摘要
-        id: output_summary
         run: |
           ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
           ENABLE_SUSFS='${{ inputs.enable_susfs }}'
-          ENABLE_NOMOUNT='${{ inputs.enable_nomount }}'
-          ENABLE_BBR='${{ inputs.enable_bbr }}'
           ENABLE_LXC_DOCKER='${{ inputs.enable_lxc_docker }}'
           ENABLE_KVM='${{ inputs.enable_kvm }}'
           {
@@ -584,8 +514,6 @@ jobs:
             echo "| **Total** | ${{ needs.setup-matrix.outputs.total-count }} |"
             echo "| **Publish Tag** | ${{ needs.prepare.outputs.tag }} |"
             echo "| **Enable SUSFS** | ${{ inputs.enable_susfs }} |"
-            echo "| **Enable NoMount** | ${{ inputs.enable_nomount }} |"
-            echo "| **Enable BBR** | ${{ inputs.enable_bbr }} |"
             echo "| **Enable LXC/Docker** | ${{ inputs.enable_lxc_docker }} |"
             echo "| **Enable KVM** | ${{ inputs.enable_kvm }} |"
             echo ""
@@ -601,21 +529,15 @@ jobs:
               else
                 NAME="PFGM00-MT6833-$root"
               fi
-              # 按顺序添加后缀: Docker > KVM > BBR > SUSFS > NoMount
+              # 按顺序添加后缀：Docker > KVM > SUSFS
               if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
                 NAME="${NAME}-Docker"
               fi
               if [ "$ENABLE_KVM" = "true" ]; then
                 NAME="${NAME}-KVM"
               fi
-              if [ "$ENABLE_BBR" = "true" ]; then
-                NAME="${NAME}-BBR"
-              fi
               if [ "$ENABLE_SUSFS" = "true" ]; then
                 NAME="${NAME}-SUSFS"
-              fi
-              if [ "$ENABLE_NOMOUNT" = "true" ]; then
-                NAME="${NAME}-NoMount"
               fi
               KV_FILE="artifacts/kernel_version_${root}.txt"
               MV_FILE="artifacts/manager_version_${root}.txt"
@@ -633,32 +555,6 @@ jobs:
             echo "| **Action Name** | Build Kernel for PFGM00-MT6833 |"
           } >> $GITHUB_STEP_SUMMARY
 
-          {
-            echo "summary_release<<EOF"
-            echo "### Build Variables Summary"
-            echo ""
-            echo "| Variable | Value |"
-            echo "|------|-----|"
-            echo "| **Branch** | ${{ inputs.branch }} |"
-            echo "| **Root Config** | $ROOT_CONFIGS |"
-            echo "| **Total** | ${{ needs.setup-matrix.outputs.total-count }} |"
-            echo "| **Publish Tag** | ${{ needs.prepare.outputs.tag }} |"
-            echo "| **Enable SUSFS** | ${{ inputs.enable_susfs }} |"
-            echo "| **Enable NoMount** | ${{ inputs.enable_nomount }} |"
-            echo "| **Enable BBR** | ${{ inputs.enable_bbr }} |"
-            echo "| **Enable LXC/Docker** | ${{ inputs.enable_lxc_docker }} |"
-            echo "| **Enable KVM** | ${{ inputs.enable_kvm }} |"
-            echo ""
-            echo "### Environment Infomation"
-            echo ""
-            echo "| Variable | Value |"
-            echo "|------|-----|"
-            echo "| **Commit SHA** | ${{ github.sha }} |"
-            echo "| **Action Run Number** | ${{ github.run_number }} |"
-            echo "| **Action Name** | Build Kernel for PFGM00-MT6833 |"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
       - name: 列出已下载文件
         run: find artifacts -type f
 
@@ -671,10 +567,8 @@ jobs:
             Automated release
             | Commit ${{ github.sha }} | Build #${{ github.run_number }} |
 
-            Kernel / Manager Version Summary: 
+            Kernel / Manager Version Summary：
             ${{ steps.version_summary.outputs.summary }}
-
-            ${{ steps.output_summary.outputs.summary_release }}
           files: |
             artifacts/*.zip
             artifacts/*.gz
