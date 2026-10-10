@@ -1,0 +1,24 @@
+name: Build Kernel (Push)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ '**' ] # stop build tag commits
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    if: ${{ contains(github.event.head_commit.message, 'build kernel') }}
+    env:
+      GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
+    steps:
+      - name: Build Kernel (BakaSU + NoMount)
+        run: |
+          set -euo pipefail
+
+          echo "Build Kernel: BakaSU + NoMount"
+          gh workflow run build-kernel-mt6833.yml \
+            --repo "${{ github.repository }}" \
+            -f enable_resukisu=true \
+            -f enable_nomount=true
+
