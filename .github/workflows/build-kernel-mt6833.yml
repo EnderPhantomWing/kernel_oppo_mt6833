@@ -17,7 +17,7 @@ on:
       enable_resukisu:
         description: '启用 BakaSU (原ReSukiSU) 支持'
         required: false
-        default: false
+        default: true
         type: boolean
 
       # ========== 扩展功能 ==========
@@ -34,7 +34,7 @@ on:
       enable_nomount:
         description: '启用 NoMount VFS 挂载'
         required: false
-        default: false
+        default: true
         type: boolean
       enable_lxc_docker:
         description: '启用 LXC / Docker 支持 (需要 KernelSU)'
