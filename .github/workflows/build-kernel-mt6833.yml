@@ -557,9 +557,9 @@ jobs:
           for root in $(echo "$ROOT_CONFIGS" | jq -r '.[]'); do
             KV_FILE="artifacts/kernel_version_${root}.txt"
             MV_FILE="artifacts/manager_version_${root}.txt"
-            if [ -f "$KV_FILE" ]; then KV=$(cat "$KV_FILE"); else KV="未知"; fi
-            if [ -f "$MV_FILE" ]; then MV=$(cat "$MV_FILE"); else MV="未知"; fi
-            SUMMARY="${SUMMARY}${root}: Kernel=${KV}, Manager=${MV}\n"
+            if [ -f "$KV_FILE" ]; then KV=$(cat "$KV_FILE"); else KV="unknown"; fi
+            if [ -f "$MV_FILE" ]; then MV=$(cat "$MV_FILE"); else MV="unknown"; fi
+            SUMMARY="${SUMMARY}${root}: Kernel version=${KV}, Manager version=${MV}\n"
           done
           echo "summary<<EOF" >> "$GITHUB_OUTPUT"
           echo -e "$SUMMARY" >> "$GITHUB_OUTPUT"
@@ -659,6 +659,49 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: 下载 BakaSU Manager APK 并放入发布产物
+        run: |
+          ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
+          mkdir -p artifacts/apks
+          for root in $(echo "$ROOT_CONFIGS" | jq -r '.[]'); do
+            MV_FILE="artifacts/manager_version_${root}.txt"
+            if [ ! -f "$MV_FILE" ]; then
+              echo "跳过 ${root}: 未找到 manager 版本文件"
+              continue
+            fi
+            MV=$(tr -d '[:space:]' < "$MV_FILE")
+            if [ -z "$MV" ]; then
+              echo "跳过 ${root}: manager 版本为空"
+              continue
+            fi
+
+            RELEASE_TAG="v${MV}"
+            echo "查找 BakaSU_CI release: ${RELEASE_TAG}"
+
+            API_URL="https://api.github.com/repos/EnderPhantomWing/BakaSU_CI/releases/tags/${RELEASE_TAG}"
+            API_RESP=$(curl -sL \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github+json" \
+              "$API_URL")
+
+            # 匹配任意以 arm64-v8a-release.apk 结尾的资产
+            DOWNLOAD_URL=$(echo "$API_RESP" | jq -r '.assets[]? | select(.name | test("arm64-v8a-release\\.apk$")) | .browser_download_url' | head -n 1)
+            ASSET_NAME=$(echo "$API_RESP" | jq -r '.assets[]? | select(.name | test("arm64-v8a-release\\.apk$")) | .name' | head -n 1)
+
+            if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
+              echo "警告: ${RELEASE_TAG} 中未找到 *arm64-v8a-release.apk，跳过 ${root}"
+              continue
+            fi
+
+            OUTPUT_NAME="PFGM00-MT6833-${root}-Manager-v${MV}-${ASSET_NAME}"
+            echo "下载 ${DOWNLOAD_URL} -> artifacts/apks/${OUTPUT_NAME}"
+            curl -L -o "artifacts/apks/${OUTPUT_NAME}" "$DOWNLOAD_URL"
+            ls -lh "artifacts/apks/${OUTPUT_NAME}"
+          done
+
+          echo "===== artifacts/apks 内容 ====="
+          ls -lh artifacts/apks/ || true
+
       - name: 列出已下载文件
         run: find artifacts -type f
 
@@ -678,6 +721,7 @@ jobs:
           files: |
             artifacts/*.zip
             artifacts/*.gz
+            artifacts/apks/*.apk
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
