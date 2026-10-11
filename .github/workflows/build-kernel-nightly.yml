@@ -35,6 +35,11 @@ jobs:
             -f enable_all_roots=true \
             -f enable_lxc_docker=true \
             -f enable_kvm=true & pids+=("$!")
+          trigger "全部 Root 管理器 + LXC/Docker + KVM + NoMount" \
+            -f enable_all_roots=true \
+            -f enable_lxc_docker=true \
+            -f enable_kvm=true \
+            -f enable_nomount=true & pids+=("$!")
 
           for pid in "${pids[@]}"; do
             wait "$pid"
@@ -69,6 +74,12 @@ jobs:
             -f enable_resukisu=true \
             -f enable_lxc_docker=true \
             -f enable_kvm=true \
+            -f enable_susfs=true & pids+=("$!")
+          trigger "ReSukiSU + LXC/Docker + KVM + NoMount + SUSFS" \
+            -f enable_resukisu=true \
+            -f enable_lxc_docker=true \
+            -f enable_kvm=true \
+            -f enable_nomount=true \
             -f enable_susfs=true & pids+=("$!")
 
           for pid in "${pids[@]}"; do
