@@ -660,6 +660,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: 下载 BakaSU Manager APK 并放入发布产物
+        if: matrix.root == 'resukisu'
         run: |
           ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
           mkdir -p artifacts/apks
