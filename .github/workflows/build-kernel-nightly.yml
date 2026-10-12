@@ -1,4 +1,4 @@
-name: Nightly trigger
+name: Schedule Trigger for Build Kernel
 
 on:
   workflow_dispatch:
@@ -11,8 +11,8 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
     steps:
-      # ========== 第一批：全部 Root 管理器构建，4 个并行 ==========
-      - name: 并行触发第一批：全部 Root 管理器构建
+      # ========== 仅一波：Bakasu 构建，5 个并行 ==========
+      - name: 并行触发 Bakasu 构建
         run: |
           set -euo pipefail
 
@@ -26,61 +26,29 @@ jobs:
           }
 
           pids=()
-          trigger "全部 Root 管理器" \
-            -f enable_all_roots=true & pids+=("$!")
-          trigger "全部 Root 管理器 + NoMount" \
-            -f enable_all_roots=true \
+          trigger "BakaSU" \
+            -f enable_bakasu=true & pids+=("$!")
+          trigger "BakaSU + NoMount" \
+            -f enable_bakasu=true \
             -f enable_nomount=true & pids+=("$!")
-          trigger "全部 Root 管理器 + LXC/Docker + KVM" \
-            -f enable_all_roots=true \
-            -f enable_lxc_docker=true \
-            -f enable_kvm=true & pids+=("$!")
-          trigger "全部 Root 管理器 + LXC/Docker + KVM + NoMount" \
-            -f enable_all_roots=true \
+          trigger "BakaSU + LXC/Docker + KVM + NoMount" \
+            -f enable_bakasu=true \
             -f enable_lxc_docker=true \
             -f enable_kvm=true \
             -f enable_nomount=true & pids+=("$!")
-
-          for pid in "${pids[@]}"; do
-            wait "$pid"
-          done
-
-      - name: 等待第一批 workflow 初始化
-        run: sleep 1500
-
-      # ========== 第二批：ReSukiSU + SUSFS 管理器构建，4 个并行 ==========
-      - name: 并行触发第二批：ReSukiSU + SUSFS 构建
-        run: |
-          set -euo pipefail
-
-          trigger() {
-            local desc="$1"
-            shift
-            echo "触发: ${desc}"
-            gh workflow run build-kernel-mt6833.yml \
-              --repo "${{ github.repository }}" \
-              "$@"
-          }
-
-          pids=()
-          trigger "ReSukiSU + SUSFS" \
-            -f enable_resukisu=true \
+          trigger "BakaSU + SUSFS" \
+            -f enable_bakasu=true \
             -f enable_susfs=true & pids+=("$!")
-          trigger "ReSukiSU + NoMount + SUSFS" \
-            -f enable_resukisu=true \
-            -f enable_nomount=true \
-            -f enable_susfs=true & pids+=("$!")
-          trigger "ReSukiSU + LXC/Docker + KVM + SUSFS" \
-            -f enable_resukisu=true \
+          trigger "BakaSU + SUSFS + NoMount" \
+            -f enable_bakasu=true \
+            -f enable_susfs=true \
+            -f enable_nomount=true & pids+=("$!")
+          trigger "BakaSU + LXC/Docker + KVM + SUSFS + NoMount" \
+            -f enable_bakasu=true \
             -f enable_lxc_docker=true \
             -f enable_kvm=true \
-            -f enable_susfs=true & pids+=("$!")
-          trigger "ReSukiSU + LXC/Docker + KVM + NoMount + SUSFS" \
-            -f enable_resukisu=true \
-            -f enable_lxc_docker=true \
-            -f enable_kvm=true \
-            -f enable_nomount=true \
-            -f enable_susfs=true & pids+=("$!")
+            -f enable_susfs=true \
+            -f enable_nomount=true & pids+=("$!")
 
           for pid in "${pids[@]}"; do
             wait "$pid"
