@@ -14,7 +14,7 @@ on:
         required: false
         default: false
         type: boolean
-      enable_resukisu:
+      enable_bakasu:
         description: '启用 BakaSU (原ReSukiSU) 支持'
         required: false
         default: true
@@ -72,29 +72,29 @@ jobs:
         env:
           ENABLE_ALL_ROOTS: ${{ inputs.enable_all_roots }}
           ENABLE_KERNELSU: ${{ inputs.enable_kernelsu }}
-          ENABLE_RESUKISU: ${{ inputs.enable_resukisu }}
+          ENABLE_BAKASU: ${{ inputs.enable_bakasu }}
         run: |
           if [ "$ENABLE_ALL_ROOTS" = "true" ]; then
-            ROOT_CONFIGS='["kernelsu","resukisu"]'
+            ROOT_CONFIGS='["kernelsu","bakasu"]'
             TOTAL_COUNT=2
           else
             ROOT_LIST=""
             if [ "$ENABLE_KERNELSU" = "true" ]; then
               ROOT_LIST="${ROOT_LIST} kernelsu"
             fi
-            if [ "$ENABLE_RESUKISU" = "true" ]; then
-              ROOT_LIST="${ROOT_LIST} resukisu"
+            if [ "$ENABLE_BAKASU" = "true" ]; then
+              ROOT_LIST="${ROOT_LIST} bakasu"
             fi
             if [ -z "$ROOT_LIST" ]; then
-              ROOT_LIST="none"
+              ROOT_LIST="unknown"
             fi
             ROOT_CONFIGS=$(echo $ROOT_LIST | tr ' ' '\n' | jq -R . | jq -s -c .)
             TOTAL_COUNT=$(echo "$ROOT_CONFIGS" | jq length)
           fi
           echo "root-configs=$ROOT_CONFIGS" >> $GITHUB_OUTPUT
           echo "total-count=$TOTAL_COUNT" >> $GITHUB_OUTPUT
-          echo "Root 配置: $ROOT_CONFIGS"
-          echo "总数: $TOTAL_COUNT"
+          echo "Root Config: $ROOT_CONFIGS"
+          echo "Total: $TOTAL_COUNT"
 
   # ================================
   # 2. 计算发布标签（由矩阵共享）
@@ -243,7 +243,7 @@ jobs:
           patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
 
       - name: BakaSU (ReSukiSU) - 应用旧版补丁
-        if: matrix.root == 'resukisu'
+        if: matrix.root == 'bakasu'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           echo "KSU_LOG: 下载并应用 BakaSU (ReSukiSU) 官方 4.14 补丁"
@@ -296,16 +296,16 @@ jobs:
           fi
 
       - name: BakaSU (ReSukiSU) - 注入核心代码 + SUSFS 内联钩子
-        id: resukisuinline
-        if: matrix.root == 'resukisu'
+        id: bakasuinline
+        if: matrix.root == 'bakasu'
         run: |
           git clone --bare https://github.com/Baka-SU/BakaSU.git
           cd BakaSU.git
           COUNT=$(git rev-list --count HEAD)
-          RESUKISU_MANAGER_VERSION_CODE=$((30000 + COUNT + 700))
-          echo "resukisu_manager_version_code=$RESUKISU_MANAGER_VERSION_CODE"
-          echo "resukisu_manager_version_code=$RESUKISU_MANAGER_VERSION_CODE" >> "$GITHUB_OUTPUT"
-          echo "$RESUKISU_MANAGER_VERSION_CODE" > "$GITHUB_WORKSPACE/kernel_workspace/manager_version_resukisu.txt"
+          BAKASU_MANAGER_VERSION_CODE=$((30000 + COUNT + 700))
+          echo "bakasu_manager_version_code=$BAKASU_MANAGER_VERSION_CODE"
+          echo "bakasu_manager_version_code=$BAKASU_MANAGER_VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "$BAKASU_MANAGER_VERSION_CODE" > "$GITHUB_WORKSPACE/kernel_workspace/manager_version_bakasu.txt"
 
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           rm -rf KernelSU
@@ -464,7 +464,7 @@ jobs:
       - name: 创建 AK3 后缀
         id: gen_name
         run: |
-          if [ "${{ matrix.root }}" = "resukisu" ]; then
+          if [ "${{ matrix.root }}" = "bakasu" ]; then
             NAME="PFGM00-MT6833-BakaSU"
           else
             NAME="PFGM00-MT6833-RKSU"
@@ -486,7 +486,7 @@ jobs:
             NAME="${NAME}-NoMount"
           fi
           echo "artifact_name=${NAME}" >> $GITHUB_OUTPUT
-          echo "产物名称: ${NAME}"
+          echo "Artifact Name: ${NAME}"
 
       # ---------- 打包 ----------
       - name: 构建 AnyKernel3 包
@@ -594,8 +594,8 @@ jobs:
             echo "| Root Type | Artifact Name | Kernel Version | Root Manager Version |"
             echo "|-----------|---------------|----------|------------|"
             for root in $(echo "$ROOT_CONFIGS" | jq -r '.[]'); do
-              if [ "$root" = "resukisu" ]; then
-                NAME="PFGM00-MT6833-ReSukiSU"
+              if [ "$root" = "bakasu" ]; then
+                NAME="PFGM00-MT6833-BakaSU"
               elif [ "$root" = "kernelsu" ]; then
                 NAME="PFGM00-MT6833-RKSU"
               else
@@ -661,6 +661,7 @@ jobs:
 
       - name: 下载 BakaSU Manager APK 并放入发布产物
         run: |
+          set -euo pipefail
           ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
           mkdir -p artifacts/apks
           for root in $(echo "$ROOT_CONFIGS" | jq -r '.[]'); do
@@ -675,27 +676,46 @@ jobs:
               continue
             fi
 
-            RELEASE_TAG="v${MV}"
-            echo "查找 BakaSU_CI release: ${RELEASE_TAG}"
+            # 兼容带/不带 v 前缀
+            MV_CLEAN="${MV#v}"
+            MV_CLEAN="${MV_CLEAN#V}"
 
-            API_URL="https://api.github.com/repos/EnderPhantomWing/BakaSU_CI/releases/tags/${RELEASE_TAG}"
-            API_RESP=$(curl -sL \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github+json" \
-              "$API_URL")
+            # 依次尝试多种 tag 形式，直到找到能返回资产的 release
+            DOWNLOAD_URL=""
+            ASSET_NAME=""
+            for RELEASE_TAG in "v${MV_CLEAN}" "${MV_CLEAN}" "${MV}"; do
+              echo "尝试查找 BakaSU_CI release: ${RELEASE_TAG}"
+              API_URL="https://api.github.com/repos/EnderPhantomWing/BakaSU_CI/releases/tags/${RELEASE_TAG}"
+              API_RESP=$(curl -sL \
+                -H "Authorization: Bearer ${{ secrets.NIGHTLY_PAT }}" \
+                -H "Accept: application/vnd.github+json" \
+                "$API_URL")
 
-            # 匹配任意以 arm64-v8a-release.apk 结尾的资产
-            DOWNLOAD_URL=$(echo "$API_RESP" | jq -r '.assets[]? | select(.name | test("arm64-v8a-release\\.apk$")) | .browser_download_url' | head -n 1)
-            ASSET_NAME=$(echo "$API_RESP" | jq -r '.assets[]? | select(.name | test("arm64-v8a-release\\.apk$")) | .name' | head -n 1)
+              echo "  返回 message: $(echo "$API_RESP" | jq -r '.message // "无"')"
+              echo "  资产列表:"
+              echo "$API_RESP" | jq -r '.assets[]?.name // empty' | sed 's/^/    /' || true
+
+              # 更宽松匹配：任意包含 arm64-v8a 且以 .apk 结尾（不区分大小写）
+              ASSET_JSON=$(echo "$API_RESP" | jq -c '[.assets[]? | select(.name | test("arm64-v8a.*\\.apk$"; "i"))] | first // empty')
+              DOWNLOAD_URL=$(echo "$ASSET_JSON" | jq -r '.browser_download_url // empty')
+              ASSET_NAME=$(echo "$ASSET_JSON" | jq -r '.name // empty')
+
+              if [ -n "$DOWNLOAD_URL" ] && [ "$DOWNLOAD_URL" != "null" ]; then
+                echo "  命中 release: ${RELEASE_TAG} -> ${ASSET_NAME}"
+                break
+              fi
+              DOWNLOAD_URL=""
+              ASSET_NAME=""
+            done
 
             if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-              echo "警告: ${RELEASE_TAG} 中未找到 *arm64-v8a-release.apk，跳过 ${root}"
+              echo "警告: 在 v${MV_CLEAN} / ${MV_CLEAN} / ${MV} 中均未找到 *arm64-v8a*.apk，跳过 ${root}"
               continue
             fi
 
-            OUTPUT_NAME="PFGM00-MT6833-${root}-Manager-v${MV}-${ASSET_NAME}"
+            OUTPUT_NAME="PFGM00-MT6833-${root}-Manager-v${MV_CLEAN}-${ASSET_NAME}"
             echo "下载 ${DOWNLOAD_URL} -> artifacts/apks/${OUTPUT_NAME}"
-            curl -L -o "artifacts/apks/${OUTPUT_NAME}" "$DOWNLOAD_URL"
+            curl -fL --retry 3 --retry-delay 5 -o "artifacts/apks/${OUTPUT_NAME}" "$DOWNLOAD_URL"
             ls -lh "artifacts/apks/${OUTPUT_NAME}"
           done
 
