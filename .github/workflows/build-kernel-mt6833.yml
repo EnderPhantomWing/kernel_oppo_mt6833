@@ -251,11 +251,12 @@ jobs:
           patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
 
       - name: SUSFS - 启用 SUSFS
+        # https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch
         if: env.ENABLE_SUSFS == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           echo "KSU_LOG: 启用 SUSFS"
-          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
+          wget https://raw.githubusercontent.com/EnderPhantomWing/kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
           patch -p1 -F 3 < susfs-4.14.patch || { echo "SUSFS 补丁应用失败"; exit 1; }
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
@@ -660,10 +661,36 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: 下载 BakaSU Manager APK 并放入发布产物
+        env:
+          GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
         run: |
           set -euo pipefail
           ROOT_CONFIGS='${{ needs.setup-matrix.outputs.root-configs }}'
           mkdir -p artifacts/apks
+
+          # ── 1. 拉取 BakaSU_CI 全部 releases（分页） ──
+          echo "===== 获取 BakaSU_CI releases 列表 ====="
+          RELEASES_JSON=""
+          PAGE=1
+          while :; do
+            RESP=$(curl -sL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/EnderPhantomWing/BakaSU_CI/releases?per_page=100&page=${PAGE}")
+            COUNT=$(echo "$RESP" | jq 'if type=="array" then length else 0 end')
+            if [ "$COUNT" -eq 0 ]; then
+              break
+            fi
+            RELEASES_JSON="${RELEASES_JSON}${RESP}"
+            if [ "$COUNT" -lt 100 ]; then
+              break
+            fi
+            PAGE=$((PAGE + 1))
+          done
+
+          echo "共获取 release 数量: $(echo "$RELEASES_JSON" | jq 'length')"
+
+          # ── 2. 遍历每个 root，按版本号匹配 *-arm64-v8a-release.apk ──
           for root in $(echo "$ROOT_CONFIGS" | jq -r '.[]'); do
             MV_FILE="artifacts/manager_version_${root}.txt"
             if [ ! -f "$MV_FILE" ]; then
@@ -680,42 +707,45 @@ jobs:
             MV_CLEAN="${MV#v}"
             MV_CLEAN="${MV_CLEAN#V}"
 
-            # 依次尝试多种 tag 形式，直到找到能返回资产的 release
-            DOWNLOAD_URL=""
-            ASSET_NAME=""
-            for RELEASE_TAG in "v${MV_CLEAN}" "${MV_CLEAN}" "${MV}"; do
-              echo "尝试查找 BakaSU_CI release: ${RELEASE_TAG}"
-              API_URL="https://api.github.com/repos/EnderPhantomWing/BakaSU_CI/releases/tags/${RELEASE_TAG}"
-              API_RESP=$(curl -sL \
-                -H "Authorization: Bearer ${{ secrets.NIGHTLY_PAT }}" \
-                -H "Accept: application/vnd.github+json" \
-                "$API_URL")
+            echo "----- 处理 root=${root}, 版本=${MV_CLEAN} -----"
 
-              echo "  返回 message: $(echo "$API_RESP" | jq -r '.message // "无"')"
-              echo "  资产列表:"
-              echo "$API_RESP" | jq -r '.assets[]?.name // empty' | sed 's/^/    /' || true
+            # 在所有 release 中查找:
+            #   资产名必须以 -arm64-v8a-release.apk 结尾
+            #   且 release tag / release name / 资产名 任一包含版本号
+            ASSET_JSON=$(echo "$RELEASES_JSON" | jq -c --arg mv "$MV_CLEAN" '
+              [
+                .[]
+                | . as $rel
+                | .assets[]?
+                | select(.name | test("-arm64-v8a-release\\.apk$"; "i"))
+                | select(
+                    (.name               | contains($mv))
+                    or ($rel.tag_name    | contains($mv))
+                    or (($rel.name // "") | contains($mv))
+                  )
+                | {
+                    tag:  $rel.tag_name,
+                    name: .name,
+                    url:  .browser_download_url
+                  }
+              ] | first // empty
+            ')
 
-              # 更宽松匹配：任意包含 arm64-v8a 且以 .apk 结尾（不区分大小写）
-              ASSET_JSON=$(echo "$API_RESP" | jq -c '[.assets[]? | select(.name | test("arm64-v8a.*\\.apk$"; "i"))] | first // empty')
-              DOWNLOAD_URL=$(echo "$ASSET_JSON" | jq -r '.browser_download_url // empty')
-              ASSET_NAME=$(echo "$ASSET_JSON" | jq -r '.name // empty')
-
-              if [ -n "$DOWNLOAD_URL" ] && [ "$DOWNLOAD_URL" != "null" ]; then
-                echo "  命中 release: ${RELEASE_TAG} -> ${ASSET_NAME}"
-                break
-              fi
-              DOWNLOAD_URL=""
-              ASSET_NAME=""
-            done
+            DOWNLOAD_URL=$(echo "$ASSET_JSON" | jq -r '.url  // empty')
+            ASSET_NAME=$(echo "$ASSET_JSON"   | jq -r '.name // empty')
+            MATCHED_TAG=$(echo "$ASSET_JSON"  | jq -r '.tag  // empty')
 
             if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-              echo "警告: 在 v${MV_CLEAN} / ${MV_CLEAN} / ${MV} 中均未找到 *arm64-v8a*.apk，跳过 ${root}"
+              echo "警告: 未找到匹配 ${MV_CLEAN} 的 *-arm64-v8a-release.apk，跳过 ${root}"
               continue
             fi
 
             OUTPUT_NAME="PFGM00-MT6833-${root}-Manager-v${MV_CLEAN}-${ASSET_NAME}"
+            echo "命中 tag=${MATCHED_TAG} 资产=${ASSET_NAME}"
             echo "下载 ${DOWNLOAD_URL} -> artifacts/apks/${OUTPUT_NAME}"
-            curl -fL --retry 3 --retry-delay 5 -o "artifacts/apks/${OUTPUT_NAME}" "$DOWNLOAD_URL"
+            curl -fL --retry 3 --retry-delay 5 \
+              -o "artifacts/apks/${OUTPUT_NAME}" \
+              "$DOWNLOAD_URL"
             ls -lh "artifacts/apks/${OUTPUT_NAME}"
           done
 
