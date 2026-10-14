@@ -257,7 +257,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           echo "KSU_LOG: 启用 SUSFS"
-          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
+          wget https://raw.githubusercontent.com/EnderPhantomWing/kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
           patch -p1 < susfs-4.14.patch || { echo "SUSFS 补丁应用失败"; exit 1; }
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
