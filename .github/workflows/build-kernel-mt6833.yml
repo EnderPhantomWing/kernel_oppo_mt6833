@@ -381,14 +381,14 @@ jobs:
           export KBUILD_BUILD_HOST=Github@EnderPhantomWing
           export KBUILD_BUILD_USER=EnderPhantomWing
 
-	  # LOCALVERSION instead of '+'
+          # get LOCALVERSION
           BUILD_TIME=$(date -u +%Y%m%dT%H%M%SZ)
           COMMIT_SHORT=${GITHUB_SHA:0:10}
           RUN_NUMBER=$(printf "%05d" "${{ github.run_number }}")
           export LOCALVERSION="-g${COMMIT_SHORT}-${RUN_NUMBER}-${BUILD_TIME}"
           echo "LOCALVERSION=${LOCALVERSION}"
 
-	  # base defconfig
+          # base config generate
           make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
 
           # BBR
@@ -440,7 +440,7 @@ jobs:
 
           make O=out ARCH=arm64 olddefconfig
 
-	  # check nomount config
+          # check NoMount config
           if [ "$ENABLE_NOMOUNT" = "true" ]; then
             grep -qx 'CONFIG_NOMOUNT=y' out/.config \
               && grep -qx 'CONFIG_KEYS=y' out/.config \
