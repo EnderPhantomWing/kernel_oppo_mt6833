@@ -381,12 +381,14 @@ jobs:
           export KBUILD_BUILD_HOST=Github@EnderPhantomWing
           export KBUILD_BUILD_USER=EnderPhantomWing
 
+	  # LOCALVERSION instead of '+'
           BUILD_TIME=$(date -u +%Y%m%dT%H%M%SZ)
           COMMIT_SHORT=${GITHUB_SHA:0:10}
           RUN_NUMBER=$(printf "%05d" "${{ github.run_number }}")
           export LOCALVERSION="-g${COMMIT_SHORT}-${RUN_NUMBER}-${BUILD_TIME}"
           echo "LOCALVERSION=${LOCALVERSION}"
 
+	  # base defconfig
           make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
 
           # BBR
@@ -395,9 +397,6 @@ jobs:
             ./scripts/config --file out/.config \
               --enable CONFIG_TCP_CONG_BBR \
               --enable CONFIG_NET_SCH_FQ
-            make O=out olddefconfig
-          else
-            echo "不启用 BBR..."
           fi
 
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
@@ -414,7 +413,7 @@ jobs:
               --enable KSU_MANUAL_HOOK \
               --disable KSU_TRACEPOINT_HOOK
           else
-            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK (无 SUSFS)"
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK (non-SUSFS)"
             ./scripts/config --file out/.config \
               --enable KSU \
               --enable KSU_MANUAL_HOOK \
@@ -428,8 +427,8 @@ jobs:
               --enable CONFIG_NOMOUNT \
               --enable CONFIG_KEYS
           else
-            echo "不启用 NoMount VFS 挂载"
-            ./scripts/config --file out/.config --disable CONFIG_NOMOUNT
+            ./scripts/config --file out/.config \
+              --disable CONFIG_NOMOUNT
           fi
 
           ./scripts/config --file out/.config \
@@ -441,6 +440,7 @@ jobs:
 
           make O=out ARCH=arm64 olddefconfig
 
+	  # check nomount config
           if [ "$ENABLE_NOMOUNT" = "true" ]; then
             grep -qx 'CONFIG_NOMOUNT=y' out/.config \
               && grep -qx 'CONFIG_KEYS=y' out/.config \
