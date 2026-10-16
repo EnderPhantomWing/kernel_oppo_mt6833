@@ -29,6 +29,9 @@
 
 #include "pnode.h"
 #include "internal.h"
+
+/* Maximum number of mounts in a mount namespace */
+unsigned int sysctl_mount_max __read_mostly = 100000;
 #ifdef CONFIG_OPLUS_SECURE_GUARD
 #ifdef CONFIG_OPLUS_MOUNT_BLOCK
 #ifdef CONFIG_OPLUS_KEVENT_UPLOAD
@@ -36,9 +39,6 @@
 #endif /* CONFIG_OPLUS_KEVENT_UPLOAD */
 #endif /* CONFIG_OPLUS_MOUNT_BLOCK */
 #endif /* CONFIG_OPLUS_SECURE_GUARD*/
-
-/* Maximum number of mounts in a mount namespace */
-unsigned int sysctl_mount_max __read_mostly = 100000;
 
 static unsigned int m_hash_mask __read_mostly;
 static unsigned int m_hash_shift __read_mostly;
