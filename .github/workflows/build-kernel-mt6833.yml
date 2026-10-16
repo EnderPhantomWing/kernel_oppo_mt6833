@@ -297,16 +297,6 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
 
-<<<<<<< HEAD
-          # get LOCALVERSION
-          BUILD_TIME=$(date -u +%Y%m%dT%H%M%SZ)
-          COMMIT_SHORT=${GITHUB_SHA:0:10}
-          RUN_NUMBER=$(printf "%05d" "${{ github.run_number }}")
-          export LOCALVERSION="-g${COMMIT_SHORT}-${RUN_NUMBER}-${BUILD_TIME}"
-          echo "LOCALVERSION=${LOCALVERSION}"
-
-          # base config generate
-=======
           if [ "$ENABLE_KVM" = "true" ]; then
             cat >> arch/arm64/configs/PFGM00_defconfig <<'EOF'
           CONFIG_VIRTUALIZATION=y
@@ -316,7 +306,6 @@ jobs:
           EOF
           fi
 
->>>>>>> bb4e7981d (chore: streamline github action script)
           make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
 
           if [ "$ENABLE_BBR" = "true" ]; then
@@ -363,10 +352,6 @@ jobs:
 
           make O=out ARCH=arm64 olddefconfig
 
-<<<<<<< HEAD
-          # check NoMount config
-=======
->>>>>>> bb4e7981d (chore: streamline github action script)
           if [ "$ENABLE_NOMOUNT" = "true" ]; then
             grep -qx 'CONFIG_NOMOUNT=y' out/.config \
               && grep -qx 'CONFIG_KEYS=y' out/.config \
