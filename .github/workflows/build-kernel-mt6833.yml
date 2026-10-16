@@ -53,6 +53,9 @@ on:
           - main/bpf/4.14.186-2
 
 jobs:
+  # ================================
+  # 1. 生成矩阵与发布标签
+  # ================================
   setup:
     runs-on: ubuntu-latest
     outputs:
@@ -73,6 +76,7 @@ jobs:
           ENABLE_NOMOUNT: ${{ inputs.enable_nomount }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
+          set -e
           ROOTS="[]"
           if [ "$ENABLE_ALL_ROOTS" = "true" ]; then
             ROOTS='["kernelsu","bakasu"]'
@@ -90,6 +94,7 @@ jobs:
             echo "matrix=[]" >> "$GITHUB_OUTPUT"
             echo "total=0" >> "$GITHUB_OUTPUT"
             echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "未选择任何 Root 管理器，跳过构建"
             exit 0
           fi
 
@@ -124,6 +129,9 @@ jobs:
           echo "Matrix: $MATRIX"
           echo "Tag: $TAG"
 
+  # ================================
+  # 2. 矩阵构建
+  # ================================
   build:
     needs: setup
     if: needs.setup.outputs.total != '0'
@@ -155,9 +163,14 @@ jobs:
           sudo -E apt-get -y -qq install \
             git make bc bison ccache openssl dos2unix zip kmod cpio flex \
             libelf-dev curl libssl-dev libtfm-dev wget device-tree-compiler \
-            ca-certificates python3 binutils binutils-aarch64-linux-gnu \
-            binutils-arm-linux-gnueabi jq
+            ca-certificates python3 \
+            binutils binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi \
+            jq
           mkdir -p $GITHUB_WORKSPACE/kernel_workspace
+
+          echo "===== 检查 ld ====="
+          which ld || echo "WARN: 系统 ld not found"
+          ld --version 2>/dev/null | head -n1 || true
 
       - name: 下载 GCC / Clang 工具链
         run: |
@@ -165,21 +178,28 @@ jobs:
 
           mkdir -p gcc64 gcc32 clang-aosp
 
+          # 64 位 GCC 工具链
           wget -O gcc-aarch64.tar.gz --tries=3 --timeout=30 \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz \
             || wget -O gcc-aarch64.tar.gz --tries=3 --timeout=30 \
             https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/aarch64-linux-android-4.9-refs_tags_android-12.1.0_r27.tar.gz
           tar -C gcc64/ -zxvf gcc-aarch64.tar.gz
 
+          # 32 位 GCC 工具链
           wget -O gcc-arm.tar.gz --tries=3 --timeout=30 \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz \
             || wget -O gcc-arm.tar.gz --tries=3 --timeout=30 \
             https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/arm-linux-androideabi-4.9-refs_tags_android-12.1.0_r27.tar.gz
           tar -C gcc32/ -zxvf gcc-arm.tar.gz
 
+          # Clang 工具链 (AOSP)
           git clone -q --depth=1 \
             https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 \
             -b 10.0 clang-aosp
+
+          echo "===== 检查 clang 工具链内的 ld.lld ====="
+          ls -l $GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin/ld.lld || \
+            echo "WARN: clang-aosp/bin/ld.lld not found"
 
       - name: 下载内核源码
         run: |
@@ -213,6 +233,7 @@ jobs:
         if: env.ENABLE_SUSFS == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          echo "KSU_LOG: 启用 SUSFS"
           wget https://raw.githubusercontent.com/EnderPhantomWing/kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
           patch -p1 < susfs-4.14.patch || { echo "SUSFS 补丁应用失败"; exit 1; }
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
@@ -223,6 +244,7 @@ jobs:
         if: env.ENABLE_NOMOUNT == 'true'
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          echo "KSU_LOG: 启用 NoMount VFS 挂载"
           curl -LfsS \
             https://raw.githubusercontent.com/maxsteeel/nomount/refs/heads/dev/kernel/setup.sh \
             -o nomount-setup.sh \
@@ -238,6 +260,7 @@ jobs:
             git clone --bare https://github.com/rsuntk/KernelSU.git
             COUNT=$(git -C KernelSU.git rev-list --count HEAD)
             MV=$((29971 + COUNT))
+            echo "ksu_manager_version_code=$MV"
             echo "$MV" > manager_version_kernelsu.txt
 
             cd android-kernel
@@ -247,6 +270,7 @@ jobs:
             git clone --bare https://github.com/Baka-SU/BakaSU.git
             COUNT=$(git -C BakaSU.git rev-list --count HEAD)
             MV=$((30000 + COUNT + 700))
+            echo "bakasu_manager_version_code=$MV"
             echo "$MV" > manager_version_bakasu.txt
 
             cd android-kernel
@@ -295,8 +319,19 @@ jobs:
 
       - name: 配置 defconfig
         run: |
+          set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
 
+          # 关键：导出 clang 工具链，避免使用系统 gcc/collect2 找不到 ld
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+
+          echo "===== 环境检查 ====="
+          which clang || true
+          which ld.lld || true
+          clang --version | head -n1 || true
+          ld.lld --version | head -n1 || true
+
+          # KVM 直接追加到 defconfig
           if [ "$ENABLE_KVM" = "true" ]; then
             cat >> arch/arm64/configs/PFGM00_defconfig <<'EOF'
           CONFIG_VIRTUALIZATION=y
@@ -306,9 +341,19 @@ jobs:
           EOF
           fi
 
-          make -j$(nproc --all) O=out ARCH=arm64 PFGM00_defconfig
+          # 关键：defconfig 阶段也强制 HOSTCC=clang，LD=ld.lld
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            CC=clang \
+            HOSTCC=clang \
+            HOSTCXX=clang++ \
+            LD=ld.lld \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            PFGM00_defconfig
 
           if [ "$ENABLE_BBR" = "true" ]; then
+            echo "启用 BBR..."
             ./scripts/config --file out/.config \
               --enable CONFIG_TCP_CONG_BBR \
               --enable CONFIG_NET_SCH_FQ
@@ -321,12 +366,14 @@ jobs:
           fi
 
           if [ "$ENABLE_SUSFS" = "true" ]; then
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS (手动钩子)"
             ./scripts/config --file out/.config \
               --enable KSU \
               --enable KSU_SUSFS \
               --enable KSU_MANUAL_HOOK \
               --disable KSU_TRACEPOINT_HOOK
           else
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK (non-SUSFS)"
             ./scripts/config --file out/.config \
               --enable KSU \
               --enable KSU_MANUAL_HOOK \
@@ -335,6 +382,7 @@ jobs:
           fi
 
           if [ "$ENABLE_NOMOUNT" = "true" ]; then
+            echo "KSU_LOG: 启用 NoMount VFS 挂载"
             ./scripts/config --file out/.config \
               --enable CONFIG_NOMOUNT \
               --enable CONFIG_KEYS
@@ -350,7 +398,9 @@ jobs:
             --enable DEVTMPFS_MOUNT \
             --enable SECTION_MISMATCH_WARN_ONLY
 
-          make O=out ARCH=arm64 olddefconfig
+          make O=out ARCH=arm64 \
+            CC=clang HOSTCC=clang HOSTCXX=clang++ LD=ld.lld \
+            olddefconfig
 
           if [ "$ENABLE_NOMOUNT" = "true" ]; then
             grep -qx 'CONFIG_NOMOUNT=y' out/.config \
@@ -363,6 +413,7 @@ jobs:
 
       - name: 构建内核
         run: |
+          set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
           export KBUILD_BUILD_HOST=Github@EnderPhantomWing
@@ -372,6 +423,7 @@ jobs:
           COMMIT_SHORT=${GITHUB_SHA:0:10}
           RUN_NUMBER=$(printf "%05d" "${{ github.run_number }}")
           export LOCALVERSION="-g${COMMIT_SHORT}-${RUN_NUMBER}-${BUILD_TIME}"
+          echo "LOCALVERSION=${LOCALVERSION}"
 
           make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
             CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -381,10 +433,12 @@ jobs:
             KCFLAGS="$KCFLAGS_EXTRA"
 
           KERNEL_VERSION=$(make -s O=out ARCH=arm64 kernelrelease | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
-          echo "$KERNEL_VERSION" > ../kernel_version_${ROOT_TYPE}.txt
+          echo "KERNEL_VERSION=${KERNEL_VERSION}"
+          echo "$KERNEL_VERSION" > "$GITHUB_WORKSPACE/kernel_workspace/kernel_version_${ROOT_TYPE}.txt"
 
       - name: 打包 AnyKernel3 与镜像
         run: |
+          set -e
           cd $GITHUB_WORKSPACE/kernel_workspace
           git clone https://github.com/EnderPhantomWing/AnyKernel3
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
@@ -409,6 +463,9 @@ jobs:
             kernel_workspace/manager_version_${{ matrix.root }}.txt
           if-no-files-found: error
 
+  # ================================
+  # 3. 摘要与发布
+  # ================================
   release:
     needs: [setup, build]
     if: needs.setup.outputs.total != '0'
@@ -475,7 +532,10 @@ jobs:
           set -euo pipefail
           MATRIX='${{ needs.setup.outputs.matrix }}'
           mkdir -p artifacts/apks
+
+          echo "===== 获取 BakaSU_CI releases 列表 ====="
           RELEASES_JSON=$(gh api --paginate --slurp /repos/EnderPhantomWing/BakaSU_CI/releases)
+          echo "共获取 release 数量: $(echo "$RELEASES_JSON" | jq 'length')"
 
           echo "$MATRIX" | jq -r '.[] | [.root, .artifact] | @tsv' | while IFS=$'\t' read -r root artifact; do
             MV_FILE="artifacts/manager_version_${root}.txt"
@@ -492,6 +552,8 @@ jobs:
 
             MV_CLEAN="${MV#v}"
             MV_CLEAN="${MV_CLEAN#V}"
+
+            echo "----- 处理 root=${root}, 版本=${MV_CLEAN} -----"
 
             ASSET_JSON=$(echo "$RELEASES_JSON" | jq -c --arg mv "$MV_CLEAN" '
               [
@@ -514,21 +576,25 @@ jobs:
 
             DOWNLOAD_URL=$(echo "$ASSET_JSON" | jq -r '.url  // empty')
             ASSET_NAME=$(echo "$ASSET_JSON"   | jq -r '.name // empty')
+            MATCHED_TAG=$(echo "$ASSET_JSON"  | jq -r '.tag  // empty')
 
             if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
               echo "警告: 未找到匹配 ${MV_CLEAN} 的 *-arm64-v8a-release.apk，跳过 ${root}"
               continue
             fi
 
-            echo "下载 ${ASSET_NAME}"
+            echo "命中 tag=${MATCHED_TAG} 资产=${ASSET_NAME}"
+            echo "下载 ${DOWNLOAD_URL} -> artifacts/apks/${ASSET_NAME}"
             curl -fL --retry 3 --retry-delay 5 \
               -o "artifacts/apks/${ASSET_NAME}" \
               "$DOWNLOAD_URL"
+            ls -lh "artifacts/apks/${ASSET_NAME}"
           done
 
+          echo "===== artifacts/apks 内容 ====="
           ls -lh artifacts/apks/ || true
 
-      - name: 列出文件
+      - name: 列出已下载文件
         run: find artifacts -type f
 
       - name: 创建发布并上传
