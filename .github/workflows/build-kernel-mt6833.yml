@@ -62,6 +62,7 @@ jobs:
       matrix: ${{ steps.setup.outputs.matrix }}
       total: ${{ steps.setup.outputs.total }}
       tag: ${{ steps.setup.outputs.tag }}
+      feature_suffix: ${{ steps.setup.outputs.feature_suffix }}
     steps:
       - name: 生成矩阵与发布标签
         id: setup
@@ -94,6 +95,7 @@ jobs:
             echo "matrix=[]" >> "$GITHUB_OUTPUT"
             echo "total=0" >> "$GITHUB_OUTPUT"
             echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "feature_suffix=" >> "$GITHUB_OUTPUT"
             echo "未选择任何 Root 管理器，跳过构建"
             exit 0
           fi
@@ -126,8 +128,10 @@ jobs:
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           echo "total=$COUNT" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "feature_suffix=$FUNC_SUFFIX" >> "$GITHUB_OUTPUT"
           echo "Matrix: $MATRIX"
           echo "Tag: $TAG"
+          echo "Feature Suffix: $FUNC_SUFFIX"
 
   # ================================
   # 2. 矩阵构建
@@ -143,6 +147,7 @@ jobs:
     env:
       ROOT_TYPE: ${{ matrix.root }}
       ARTIFACT_NAME: ${{ matrix.artifact }}
+      FEATURE_SUFFIX: ${{ needs.setup.outputs.feature_suffix }}
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
       ENABLE_SUSFS: ${{ inputs.enable_susfs }}
       ENABLE_NOMOUNT: ${{ inputs.enable_nomount }}
@@ -436,7 +441,7 @@ jobs:
           echo "KERNEL_VERSION=${KERNEL_VERSION}"
           echo "$KERNEL_VERSION" > "$GITHUB_WORKSPACE/kernel_workspace/kernel_version_${ROOT_TYPE}.txt"
 
-      - name: 打包 AnyKernel3 与镜像
+      - name: 打包 AnyKernel3 与镜像（AK3- 前缀）
         run: |
           set -e
           cd $GITHUB_WORKSPACE/kernel_workspace
@@ -447,21 +452,91 @@ jobs:
           cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           rm -rf AnyKernel3/.git* AnyKernel3/README.md
 
-          ZIP_NAME="${ARTIFACT_NAME}.zip"
+          # AK3- 前缀
+          ZIP_NAME="AK3-${ARTIFACT_NAME}.zip"
           (cd AnyKernel3 && zip -r9 "../${ZIP_NAME}" .)
+
           cp android-kernel/out/arch/arm64/boot/Image.gz "Image-${ROOT_TYPE}.gz"
           ls -lh "${ZIP_NAME}" "Image-${ROOT_TYPE}.gz"
 
-      - name: 上传构建产物
+      - name: 使用 magiskboot 重建 boot 镜像
+        run: |
+          set -e
+          cd $GITHUB_WORKSPACE/kernel_workspace
+
+          # 读取管理器版本号
+          MV=$(tr -d '[:space:]' < "manager_version_${ROOT_TYPE}.txt")
+          echo "Manager version: $MV"
+
+          # 准备独立工作目录
+          mkdir -p bootwork
+          cd bootwork
+
+          # 下载 magiskboot
+          echo "===== 下载 magiskboot ====="
+          wget -q -O magiskboot "https://github.com/Uevo001/magiskboot-linux/raw/refs/heads/main/x86_64/magiskboot"
+          chmod +x magiskboot
+          ./magiskboot 2>&1 | head -n3 || true
+
+          # 下载原始 boot 镜像
+          echo "===== 下载 boot-ressu-35056.img ====="
+          wget -q -O boot-ressu-35056.img \
+            "https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/20260810/boot-ressu-35056.img"
+          ls -lh boot-ressu-35056.img
+
+          # 解包
+          echo "===== magiskboot unpack ====="
+          ./magiskboot unpack boot-ressu-35056.img
+          ls -la
+
+          # 从 Image.gz 提取 Image 并重命名为 kernel
+          echo "===== 替换 kernel ====="
+          gunzip -c "../Image-${ROOT_TYPE}.gz" > kernel
+          ls -lh kernel
+
+          # 重新打包
+          echo "===== magiskboot repack ====="
+          ./magiskboot repack boot-ressu-35056.img
+          ls -lh new-boot.img
+
+          # 重命名并移动到工作区
+          FEATURE_SUFFIX="${FEATURE_SUFFIX:-}"
+          FINAL_NAME="boot-${MV}-PFGM00-MT6833-${ROOT_TYPE}${FEATURE_SUFFIX}.img"
+          echo "Final boot name: ${FINAL_NAME}"
+          cp new-boot.img "../${FINAL_NAME}"
+          cd ..
+          ls -lh "${FINAL_NAME}"
+
+      # ---------- 拆分上传（不再打包为 build-${{ matrix.root }}） ----------
+      - name: 上传 AK3 包
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.root }}
+          name: ak3-${{ matrix.root }}
+          path: kernel_workspace/AK3-${{ matrix.artifact }}.zip
+          if-no-files-found: error
+
+      - name: 上传内核镜像
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.root }}
+          path: kernel_workspace/Image-${{ matrix.root }}.gz
+          if-no-files-found: error
+
+      - name: 上传重建的 boot 镜像
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-${{ matrix.root }}
+          path: kernel_workspace/boot-*.img
+          if-no-files-found: error
+
+      - name: 上传版本信息
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-info-${{ matrix.root }}
           path: |
-            kernel_workspace/${{ matrix.artifact }}.zip
-            kernel_workspace/Image-${{ matrix.root }}.gz
             kernel_workspace/kernel_version_${{ matrix.root }}.txt
             kernel_workspace/manager_version_${{ matrix.root }}.txt
-          if-no-files-found: error
+          if-no-files-found: warn
 
   # ================================
   # 3. 摘要与发布
@@ -507,7 +582,7 @@ jobs:
               MV_FILE="artifacts/manager_version_${root}.txt"
               KV=$(cat "$KV_FILE" 2>/dev/null || echo "N/A")
               MV=$(cat "$MV_FILE" 2>/dev/null || echo "N/A")
-              echo "| $root | ak3-$root / ${artifact}.zip | $KV | $MV |"
+              echo "| $root | AK3-${artifact}.zip | $KV | $MV |"
             done
             echo ""
             echo "### Environment Infomation"
@@ -610,6 +685,7 @@ jobs:
           files: |
             artifacts/*.zip
             artifacts/*.gz
+            artifacts/*.img
             artifacts/apks/*.apk
           generate_release_notes: true
         env:
