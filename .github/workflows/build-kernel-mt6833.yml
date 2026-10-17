@@ -603,6 +603,7 @@ jobs:
       - name: 下载 BakaSU Manager APK
         env:
           GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
+        continue-on-error: true
         run: |
           set -euo pipefail
           MATRIX='${{ needs.setup.outputs.matrix }}'

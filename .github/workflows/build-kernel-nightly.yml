@@ -26,27 +26,20 @@ jobs:
           }
 
           pids=()
-          trigger "BakaSU" \
-            -f enable_bakasu=true & pids+=("$!")
-          trigger "BakaSU + NoMount" \
+          trigger "BakaSU + BBR" \
             -f enable_bakasu=true \
+            -f enable_bbr=true & pids+=("$!")
+          trigger "BakaSU + BBR + NoMount" \
+            -f enable_bakasu=true \
+            -f enable_bbr=true \
             -f enable_nomount=true & pids+=("$!")
-          trigger "BakaSU + LXC/Docker + KVM + NoMount" \
+          trigger "BakaSU + BBR + SUSFS" \
             -f enable_bakasu=true \
-            -f enable_lxc_docker=true \
-            -f enable_kvm=true \
-            -f enable_nomount=true & pids+=("$!")
-          trigger "BakaSU + SUSFS" \
-            -f enable_bakasu=true \
+            -f enable_bbr=true \
             -f enable_susfs=true & pids+=("$!")
-          trigger "BakaSU + SUSFS + NoMount" \
+          trigger "BakaSU + BBR + SUSFS + NoMount" \
             -f enable_bakasu=true \
-            -f enable_susfs=true \
-            -f enable_nomount=true & pids+=("$!")
-          trigger "BakaSU + LXC/Docker + KVM + SUSFS + NoMount" \
-            -f enable_bakasu=true \
-            -f enable_lxc_docker=true \
-            -f enable_kvm=true \
+            -f enable_bbr=true \
             -f enable_susfs=true \
             -f enable_nomount=true & pids+=("$!")
 
