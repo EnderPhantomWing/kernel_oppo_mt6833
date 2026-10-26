@@ -239,8 +239,8 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           echo "KSU_LOG: 启用 SUSFS"
-          wget https://raw.githubusercontent.com/sanba0519/Kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
-          patch -p1 -F 3 < susfs-4.14.patch || { echo "SUSFS 补丁应用失败"; exit 1; }
+          wget https://raw.githubusercontent.com/EnderPhantomWing/kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
+          patch -p1 < susfs-4.14.patch || { echo "SUSFS 补丁应用失败"; exit 1; }
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
             || { echo "SUSFS fdinfo 兼容性修复失败"; exit 1; }
@@ -373,17 +373,18 @@ jobs:
           if [ "$ENABLE_SUSFS" = "true" ]; then
             echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS (手动钩子)"
             ./scripts/config --file out/.config \
-              --enable KSU \
-              --enable KSU_SUSFS \
-              --enable KSU_MANUAL_HOOK \
-              --disable KSU_TRACEPOINT_HOOK
+              --enable CONFIG_KSU \
+              --enable CONFIG_KSU_SUSFS \
+              --enable CONFIG_KSU_SUSFS_SUS_KSTAT \
+              --enable CONFIG_KSU_MANUAL_HOOK \
+              --disable CONFIG_KSU_TRACEPOINT_HOOK
           else
             echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK (non-SUSFS)"
             ./scripts/config --file out/.config \
-              --enable KSU \
-              --enable KSU_MANUAL_HOOK \
-              --disable KSU_SUSFS \
-              --disable KSU_TRACEPOINT_HOOK
+              --enable CONFIG_KSU \
+              --enable CONFIG_KSU_MANUAL_HOOK \
+              --disable CONFIG_KSU_SUSFS \
+              --disable CONFIG_KSU_TRACEPOINT_HOOK
           fi
 
           if [ "$ENABLE_NOMOUNT" = "true" ]; then
@@ -397,11 +398,11 @@ jobs:
           fi
 
           ./scripts/config --file out/.config \
-            --enable NAMESPACES \
-            --enable DEVTMPFS \
-            --disable USER_NS \
-            --enable DEVTMPFS_MOUNT \
-            --enable SECTION_MISMATCH_WARN_ONLY
+            --enable CONFIG_NAMESPACES \
+            --enable CONFIG_DEVTMPFS \
+            --disable CONFIG_USER_NS \
+            --enable CONFIG_DEVTMPFS_MOUNT \
+            --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
 
           make O=out ARCH=arm64 \
             CC=clang HOSTCC=clang HOSTCXX=clang++ LD=ld.lld \
