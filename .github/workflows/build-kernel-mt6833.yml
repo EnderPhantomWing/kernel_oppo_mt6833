@@ -374,9 +374,8 @@ jobs:
             echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS (手动钩子)"
             ./scripts/config --file out/.config \
               --enable CONFIG_KSU \
-              --enable CONFIG_KSU_SUSFS \
-              --enable CONFIG_KSU_SUSFS_SUS_KSTAT \
               --enable CONFIG_KSU_MANUAL_HOOK \
+              --enable CONFIG_KSU_SUSFS \
               --disable CONFIG_KSU_TRACEPOINT_HOOK
           else
             echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK (non-SUSFS)"
