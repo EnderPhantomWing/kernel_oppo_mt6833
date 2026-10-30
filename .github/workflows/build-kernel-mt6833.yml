@@ -203,45 +203,12 @@ jobs:
             https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 \
             -b 10.0 clang-aosp
 
-          echo "===== 定位 GCC 可执行文件 ====="
-
-          # 注意：不要用 -type f，AOSP GCC 的 gcc 驱动通常是符号链接
-          GCC64_GCC=$(find "$GITHUB_WORKSPACE/kernel_workspace/gcc64" -name aarch64-linux-android-gcc | head -n1)
-          GCC32_GCC=$(find "$GITHUB_WORKSPACE/kernel_workspace/gcc32" -name arm-linux-androideabi-gcc | head -n1)
-
-          if [ -z "$GCC64_GCC" ]; then
-            echo "WARN: 未找到 aarch64-linux-android-gcc，尝试直接使用 gcc64/bin"
-            GCC64_BIN="$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin"
-          else
-            GCC64_BIN=$(dirname "$GCC64_GCC")
-          fi
-
-          if [ -z "$GCC32_GCC" ]; then
-            echo "WARN: 未找到 arm-linux-androideabi-gcc，尝试直接使用 gcc32/bin"
-            GCC32_BIN="$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin"
-          else
-            GCC32_BIN=$(dirname "$GCC32_GCC")
-          fi
-
-          echo "GCC64_BIN=$GCC64_BIN"
-          echo "GCC32_BIN=$GCC32_BIN"
-
-          if [ ! -x "$GCC64_BIN/aarch64-linux-android-gcc" ]; then
-            echo "ERROR: $GCC64_BIN/aarch64-linux-android-gcc 不存在或不可执行"
-            ls -la "$GCC64_BIN" | head -n30 || true
-            exit 1
-          fi
-          if [ ! -x "$GCC32_BIN/arm-linux-androideabi-gcc" ]; then
-            echo "ERROR: $GCC32_BIN/arm-linux-androideabi-gcc 不存在或不可执行"
-            ls -la "$GCC32_BIN" | head -n30 || true
-            exit 1
-          fi
-
-          echo "KERNEL_GCC64_BIN=$GCC64_BIN" >> "$GITHUB_ENV"
-          echo "KERNEL_GCC32_BIN=$GCC32_BIN" >> "$GITHUB_ENV"
-
-          echo "===== 检查 clang 工具链内的 ld.lld ====="
-          ls -l $GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin/ld.lld || \
+          echo "===== 工具链目录检查（仅供参考，不阻断构建）====="
+          ls -l gcc64/bin/aarch64-linux-android-gcc 2>/dev/null || \
+            echo "WARN: gcc64/bin/aarch64-linux-android-gcc 不存在（内核主要由 clang 构建，可忽略）"
+          ls -l gcc32/bin/arm-linux-androideabi-gcc 2>/dev/null || \
+            echo "WARN: gcc32/bin/arm-linux-androideabi-gcc 不存在（内核主要由 clang 构建，可忽略）"
+          ls -l clang-aosp/bin/ld.lld 2>/dev/null || \
             echo "WARN: clang-aosp/bin/ld.lld not found"
 
       - name: 下载内核源码
@@ -381,17 +348,16 @@ jobs:
           set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
 
-          # 统一 PATH：clang-aosp + 实际 GCC bin 目录
-          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:${KERNEL_GCC64_BIN}:${KERNEL_GCC32_BIN}:$PATH
+          # 回退到硬编码 PATH，不做 find 定位
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
 
           echo "===== 环境检查 ====="
           which clang || true
           which ld.lld || true
-          which aarch64-linux-android-gcc || true
-          which arm-linux-androideabi-gcc || true
+          which aarch64-linux-android-gcc || echo "WARN: aarch64-linux-android-gcc 不在 PATH（可忽略）"
+          which arm-linux-androideabi-gcc || echo "WARN: arm-linux-androideabi-gcc 不在 PATH（可忽略）"
           clang --version | head -n1 || true
           ld.lld --version | head -n1 || true
-          aarch64-linux-android-gcc --version | head -n1 || true
 
           # KVM 直接追加到 defconfig
           if [ "$ENABLE_KVM" = "true" ]; then
@@ -491,7 +457,7 @@ jobs:
         run: |
           set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:${KERNEL_GCC64_BIN}:${KERNEL_GCC32_BIN}:$PATH
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
           export KBUILD_BUILD_HOST=Github@EnderPhantomWing
           export KBUILD_BUILD_USER=EnderPhantomWing
 
