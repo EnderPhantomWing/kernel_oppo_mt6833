@@ -204,19 +204,36 @@ jobs:
             -b 10.0 clang-aosp
 
           echo "===== 定位 GCC 可执行文件 ====="
-          GCC64_BIN=$(dirname "$(find "$GITHUB_WORKSPACE/kernel_workspace/gcc64" -name aarch64-linux-android-gcc -type f | head -n1)")
-          GCC32_BIN=$(dirname "$(find "$GITHUB_WORKSPACE/kernel_workspace/gcc32" -name arm-linux-androideabi-gcc -type f | head -n1)")
+
+          # 注意：不要用 -type f，AOSP GCC 的 gcc 驱动通常是符号链接
+          GCC64_GCC=$(find "$GITHUB_WORKSPACE/kernel_workspace/gcc64" -name aarch64-linux-android-gcc | head -n1)
+          GCC32_GCC=$(find "$GITHUB_WORKSPACE/kernel_workspace/gcc32" -name arm-linux-androideabi-gcc | head -n1)
+
+          if [ -z "$GCC64_GCC" ]; then
+            echo "WARN: 未找到 aarch64-linux-android-gcc，尝试直接使用 gcc64/bin"
+            GCC64_BIN="$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin"
+          else
+            GCC64_BIN=$(dirname "$GCC64_GCC")
+          fi
+
+          if [ -z "$GCC32_GCC" ]; then
+            echo "WARN: 未找到 arm-linux-androideabi-gcc，尝试直接使用 gcc32/bin"
+            GCC32_BIN="$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin"
+          else
+            GCC32_BIN=$(dirname "$GCC32_GCC")
+          fi
+
           echo "GCC64_BIN=$GCC64_BIN"
           echo "GCC32_BIN=$GCC32_BIN"
 
-          if [ -z "$GCC64_BIN" ] || [ ! -x "$GCC64_BIN/aarch64-linux-android-gcc" ]; then
-            echo "ERROR: 找不到 aarch64-linux-android-gcc"
-            find "$GITHUB_WORKSPACE/kernel_workspace/gcc64" -maxdepth 4 -type f -name '*gcc*' | head -n20 || true
+          if [ ! -x "$GCC64_BIN/aarch64-linux-android-gcc" ]; then
+            echo "ERROR: $GCC64_BIN/aarch64-linux-android-gcc 不存在或不可执行"
+            ls -la "$GCC64_BIN" | head -n30 || true
             exit 1
           fi
-          if [ -z "$GCC32_BIN" ] || [ ! -x "$GCC32_BIN/arm-linux-androideabi-gcc" ]; then
-            echo "ERROR: 找不到 arm-linux-androideabi-gcc"
-            find "$GITHUB_WORKSPACE/kernel_workspace/gcc32" -maxdepth 4 -type f -name '*gcc*' | head -n20 || true
+          if [ ! -x "$GCC32_BIN/arm-linux-androideabi-gcc" ]; then
+            echo "ERROR: $GCC32_BIN/arm-linux-androideabi-gcc 不存在或不可执行"
+            ls -la "$GCC32_BIN" | head -n30 || true
             exit 1
           fi
 
