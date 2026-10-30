@@ -179,6 +179,7 @@ jobs:
 
       - name: 下载 GCC / Clang 工具链
         run: |
+          set -e
           cd $GITHUB_WORKSPACE/kernel_workspace
 
           mkdir -p gcc64 gcc32 clang-aosp
@@ -188,19 +189,39 @@ jobs:
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz \
             || wget -O gcc-aarch64.tar.gz --tries=3 --timeout=30 \
             https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/aarch64-linux-android-4.9-refs_tags_android-12.1.0_r27.tar.gz
-          tar -C gcc64/ -zxvf gcc-aarch64.tar.gz
+          tar -C gcc64/ -zxf gcc-aarch64.tar.gz
 
           # 32 位 GCC 工具链
           wget -O gcc-arm.tar.gz --tries=3 --timeout=30 \
             https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz \
             || wget -O gcc-arm.tar.gz --tries=3 --timeout=30 \
             https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/arm-linux-androideabi-4.9-refs_tags_android-12.1.0_r27.tar.gz
-          tar -C gcc32/ -zxvf gcc-arm.tar.gz
+          tar -C gcc32/ -zxf gcc-arm.tar.gz
 
           # Clang 工具链 (AOSP)
           git clone -q --depth=1 \
             https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 \
             -b 10.0 clang-aosp
+
+          echo "===== 定位 GCC 可执行文件 ====="
+          GCC64_BIN=$(dirname "$(find "$GITHUB_WORKSPACE/kernel_workspace/gcc64" -name aarch64-linux-android-gcc -type f | head -n1)")
+          GCC32_BIN=$(dirname "$(find "$GITHUB_WORKSPACE/kernel_workspace/gcc32" -name arm-linux-androideabi-gcc -type f | head -n1)")
+          echo "GCC64_BIN=$GCC64_BIN"
+          echo "GCC32_BIN=$GCC32_BIN"
+
+          if [ -z "$GCC64_BIN" ] || [ ! -x "$GCC64_BIN/aarch64-linux-android-gcc" ]; then
+            echo "ERROR: 找不到 aarch64-linux-android-gcc"
+            find "$GITHUB_WORKSPACE/kernel_workspace/gcc64" -maxdepth 4 -type f -name '*gcc*' | head -n20 || true
+            exit 1
+          fi
+          if [ -z "$GCC32_BIN" ] || [ ! -x "$GCC32_BIN/arm-linux-androideabi-gcc" ]; then
+            echo "ERROR: 找不到 arm-linux-androideabi-gcc"
+            find "$GITHUB_WORKSPACE/kernel_workspace/gcc32" -maxdepth 4 -type f -name '*gcc*' | head -n20 || true
+            exit 1
+          fi
+
+          echo "KERNEL_GCC64_BIN=$GCC64_BIN" >> "$GITHUB_ENV"
+          echo "KERNEL_GCC32_BIN=$GCC32_BIN" >> "$GITHUB_ENV"
 
           echo "===== 检查 clang 工具链内的 ld.lld ====="
           ls -l $GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin/ld.lld || \
@@ -220,23 +241,29 @@ jobs:
 
       - name: 应用 Root 补丁
         run: |
+          set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          case "$ROOT_TYPE" in
-            kernelsu)
-              echo "KSU_LOG: 下载并应用 RKSU 官方 4.14 补丁"
-              wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
-              patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
-              ;;
-            bakasu)
-              echo "KSU_LOG: 下载并应用 BakaSU (ReSukiSU) 官方 4.14 补丁"
-              wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch
-              patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
-              ;;
-          esac
+          if [ "$ENABLE_SUSFS" = "true" ]; then
+            echo "KSU_LOG: 启用 SUSFS，跳过 kernel-4.14.patch，稍后由 susfs_inline_hook_patches.sh 注入钩子"
+          else
+            case "$ROOT_TYPE" in
+              kernelsu)
+                echo "KSU_LOG: 下载并应用 RKSU 官方 4.14 补丁"
+                wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
+                patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
+                ;;
+              bakasu)
+                echo "KSU_LOG: 下载并应用 BakaSU (ReSukiSU) 官方 4.14 补丁"
+                wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch
+                patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
+                ;;
+            esac
+          fi
 
       - name: 启用 SUSFS
         if: env.ENABLE_SUSFS == 'true'
         run: |
+          set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           echo "KSU_LOG: 启用 SUSFS"
           wget https://raw.githubusercontent.com/EnderPhantomWing/kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
@@ -259,6 +286,7 @@ jobs:
       - name: 注入 Root 核心代码
         id: inline
         run: |
+          set -e
           cd $GITHUB_WORKSPACE/kernel_workspace
 
           if [ "$ROOT_TYPE" = "kernelsu" ]; then
@@ -284,11 +312,20 @@ jobs:
           fi
 
           if [ "$ENABLE_SUSFS" = "true" ]; then
-            echo "KSU_LOG: 应用 SUSFS 内联钩子"
+            echo "KSU_LOG: 应用 SUSFS 内联钩子（包含 KernelSU manual hook，替代 kernel-4.14.patch）"
             curl -LfsS \
               https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/susfs_inline_hook_patches.sh \
               -o susfs_inline_hook_patches.sh
             bash susfs_inline_hook_patches.sh
+
+            echo "===== 验证内联钩子注入结果 ====="
+            for f in fs/exec.c fs/open.c fs/stat.c fs/read_write.c kernel/reboot.c kernel/sys.c drivers/input/input.c; do
+              if grep -q "ksu_handle" "$f"; then
+                echo "[OK] $f 含 ksu_handle"
+              else
+                echo "[WARN] $f 未检测到 ksu_handle"
+              fi
+            done
           fi
 
       - name: LXC/Docker 支持
@@ -327,14 +364,17 @@ jobs:
           set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
 
-          # 关键：导出 clang 工具链，避免使用系统 gcc/collect2 找不到 ld
-          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+          # 统一 PATH：clang-aosp + 实际 GCC bin 目录
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:${KERNEL_GCC64_BIN}:${KERNEL_GCC32_BIN}:$PATH
 
           echo "===== 环境检查 ====="
           which clang || true
           which ld.lld || true
+          which aarch64-linux-android-gcc || true
+          which arm-linux-androideabi-gcc || true
           clang --version | head -n1 || true
           ld.lld --version | head -n1 || true
+          aarch64-linux-android-gcc --version | head -n1 || true
 
           # KVM 直接追加到 defconfig
           if [ "$ENABLE_KVM" = "true" ]; then
@@ -346,7 +386,7 @@ jobs:
           EOF
           fi
 
-          # 关键：defconfig 阶段也强制 HOSTCC=clang，LD=ld.lld
+          # defconfig 阶段也强制 HOSTCC=clang，LD=ld.lld
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang \
             HOSTCC=clang \
@@ -371,11 +411,12 @@ jobs:
           fi
 
           if [ "$ENABLE_SUSFS" = "true" ]; then
-            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS (手动钩子)"
+            echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_SUSFS (手动钩子，禁用 SUS_SU)"
             ./scripts/config --file out/.config \
               --enable CONFIG_KSU \
               --enable CONFIG_KSU_MANUAL_HOOK \
               --enable CONFIG_KSU_SUSFS \
+              --disable CONFIG_KSU_SUSFS_SUS_SU \
               --disable CONFIG_KSU_TRACEPOINT_HOOK
           else
             echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK (non-SUSFS)"
@@ -407,6 +448,19 @@ jobs:
             CC=clang HOSTCC=clang HOSTCXX=clang++ LD=ld.lld \
             olddefconfig
 
+          echo "===== KSU/SUSFS 配置校验 ====="
+          grep -E 'CONFIG_KSU|CONFIG_KSU_MANUAL_HOOK|CONFIG_KSU_SUSFS|CONFIG_KSU_SUSFS_SUS_SU' out/.config || true
+
+          if [ "$ENABLE_SUSFS" = "true" ]; then
+            grep -qx 'CONFIG_KSU=y' out/.config || { echo "CONFIG_KSU 未启用，终止编译"; exit 1; }
+            grep -qx 'CONFIG_KSU_MANUAL_HOOK=y' out/.config || { echo "CONFIG_KSU_MANUAL_HOOK 未启用，终止编译"; exit 1; }
+            grep -qx 'CONFIG_KSU_SUSFS=y' out/.config || { echo "CONFIG_KSU_SUSFS 未启用，终止编译"; exit 1; }
+            if grep -qx 'CONFIG_KSU_SUSFS_SUS_SU=y' out/.config; then
+              echo "CONFIG_KSU_SUSFS_SUS_SU 必须禁用，否则与 manual hook 冲突"
+              exit 1
+            fi
+          fi
+
           if [ "$ENABLE_NOMOUNT" = "true" ]; then
             grep -qx 'CONFIG_NOMOUNT=y' out/.config \
               && grep -qx 'CONFIG_KEYS=y' out/.config \
@@ -420,7 +474,7 @@ jobs:
         run: |
           set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:${KERNEL_GCC64_BIN}:${KERNEL_GCC32_BIN}:$PATH
           export KBUILD_BUILD_HOST=Github@EnderPhantomWing
           export KBUILD_BUILD_USER=EnderPhantomWing
 
@@ -452,7 +506,6 @@ jobs:
           cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           rm -rf AnyKernel3/.git* AnyKernel3/README.md
 
-          # AK3- 前缀
           ZIP_NAME="AK3-${ARTIFACT_NAME}.zip"
           (cd AnyKernel3 && zip -r9 "../${ZIP_NAME}" .)
 
@@ -464,42 +517,34 @@ jobs:
           set -e
           cd $GITHUB_WORKSPACE/kernel_workspace
 
-          # 读取管理器版本号
           MV=$(tr -d '[:space:]' < "manager_version_${ROOT_TYPE}.txt")
           echo "Manager version: $MV"
 
-          # 准备独立工作目录
           mkdir -p bootwork
           cd bootwork
 
-          # 下载 magiskboot
           echo "===== 下载 magiskboot ====="
           wget -q -O magiskboot "https://github.com/Uevo001/magiskboot-linux/raw/refs/heads/main/x86_64/magiskboot"
           chmod +x magiskboot
           ./magiskboot 2>&1 | head -n3 || true
 
-          # 下载原始 boot 镜像
           echo "===== 下载 boot-ressu-35056.img ====="
           wget -q -O boot-ressu-35056.img \
             "https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/20260810/boot-ressu-35056.img"
           ls -lh boot-ressu-35056.img
 
-          # 解包
           echo "===== magiskboot unpack ====="
           ./magiskboot unpack boot-ressu-35056.img
           ls -la
 
-          # 从 Image.gz 提取 Image 并重命名为 kernel
           echo "===== 替换 kernel ====="
           gunzip -c "../Image-${ROOT_TYPE}.gz" > kernel
           ls -lh kernel
 
-          # 重新打包
           echo "===== magiskboot repack ====="
           ./magiskboot repack boot-ressu-35056.img
           ls -lh new-boot.img
 
-          # 重命名并移动到工作区
           FEATURE_SUFFIX="${FEATURE_SUFFIX:-}"
           FINAL_NAME="boot-${MV}-PFGM00-MT6833-${ROOT_TYPE}${FEATURE_SUFFIX}.img"
           echo "Final boot name: ${FINAL_NAME}"
@@ -507,7 +552,6 @@ jobs:
           cd ..
           ls -lh "${FINAL_NAME}"
 
-      # ---------- 拆分上传（不再打包为 build-${{ matrix.root }}） ----------
       - name: 上传 AK3 包
         uses: actions/upload-artifact@v4
         with:
