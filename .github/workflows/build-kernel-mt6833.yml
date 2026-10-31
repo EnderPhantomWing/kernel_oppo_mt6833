@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      enable_kernelsu_next:
+        description: '启用 KernelSU-Next 支持'
+        required: false
+        default: false
+        type: boolean
       enable_bakasu:
         description: '启用 BakaSU (原ReSukiSU) 支持'
         required: false
@@ -76,6 +81,7 @@ jobs:
         env:
           ENABLE_ALL_ROOTS: ${{ inputs.enable_all_roots }}
           ENABLE_KERNELSU: ${{ inputs.enable_kernelsu }}
+          ENABLE_KERNELSU_NEXT: ${{ inputs.enable_kernelsu_next }}
           ENABLE_BAKASU: ${{ inputs.enable_bakasu }}
 
           # Deprecated
@@ -91,10 +97,13 @@ jobs:
           set -e
           ROOTS="[]"
           if [ "$ENABLE_ALL_ROOTS" = "true" ]; then
-            ROOTS='["kernelsu","bakasu"]'
+            ROOTS='["kernelsu","bakasu","kernelsu_next"]'
           else
             if [ "$ENABLE_KERNELSU" = "true" ]; then
               ROOTS=$(echo "$ROOTS" | jq -c '. + ["kernelsu"]')
+            fi
+            if [ "$ENABLE_KERNELSU_NEXT" = "true" ]; then
+              ROOTS=$(echo "$ROOTS" | jq -c '. + ["kernelsu_next"]')
             fi
             if [ "$ENABLE_BAKASU" = "true" ]; then
               ROOTS=$(echo "$ROOTS" | jq -c '. + ["bakasu"]')
@@ -132,6 +141,8 @@ jobs:
           MATRIX=$(for root in $(echo "$ROOTS" | jq -r '.[]'); do
             if [ "$root" = "bakasu" ]; then
               NAME="PFGM00-MT6833-BakaSU"
+            elif [ "$root" = "kernelsu_next" ]; then
+              NAME="PFGM00-mt6833-KernelSU-Next"
             else
               NAME="PFGM00-MT6833-RKSU"
             fi
@@ -253,6 +264,11 @@ jobs:
                 wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
                 patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
                 ;;
+              kernelsu_next)
+                echo "KSU_LOG: 下载并应用 KernelSU Next 官方 4.14 补丁"
+                wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
+                patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
+                ;;
               bakasu)
                 echo "KSU_LOG: 下载并应用 BakaSU (ReSukiSU) 官方 4.14 补丁"
                 wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch
@@ -300,6 +316,16 @@ jobs:
             cd android-kernel
             rm -rf KernelSU
             curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash
+          elif [ "$ROOT_TYPE" = "kernelsu_next" ]; then
+            git clone --bare https://github.com/KernelSU-Next/KernelSU-Next.git
+            COUNT=$(git -C KernelSU-Next.git rev-list --count HEAD)
+            MV=$((1 * 30000 + COUNT))
+            echo "ksu_next_manager_version_code=$MV"
+            echo "$MV" > manager_version_kernelsu_next.txt
+
+            cd android-kernel
+            rm -rf KernelSU
+            curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s legacy
           else
             git clone --bare https://github.com/Baka-SU/BakaSU.git
             COUNT=$(git -C BakaSU.git rev-list --count HEAD)
