@@ -288,27 +288,26 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           if [ "$ENABLE_SUSFS" = "true" ] && [ "$ROOT_TYPE" = "bakasu" ]; then
             echo "KSU_LOG: BakaSU + SUSFS 模式，跳过 kernel-4.14.patch，稍后由 susfs_inline_hook_patches.sh 注入钩子"
-          elif [ "$ENABLE_SUSFS" = "true" ]; then
-            echo "KSU_LOG: root=${ROOT_TYPE} 不支持 SUSFS，SUSFS 选项被忽略"
+          else
+            echo "KSU_LOG: root=${ROOT_TYPE} 不支持 SUSFS，SUSFS 选项被忽略 使用KSU_MANUAL_HOOK"
+            case "$ROOT_TYPE" in
+              kernelsu)
+                echo "KSU_LOG: 下载并应用 RKSU 官方 4.14 补丁"
+                wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
+                patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
+                ;;
+              kernelsu_next)
+                echo "KSU_LOG: 下载并应用 KernelSU Next 官方 4.14 补丁"
+                wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
+                patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
+                ;;
+              bakasu)
+                echo "KSU_LOG: 下载并应用 BakaSU (ReSukiSU) 官方 4.14 补丁"
+                wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch
+                patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
+                ;;
+            esac
           fi
-
-          case "$ROOT_TYPE" in
-            kernelsu)
-              echo "KSU_LOG: 下载并应用 RKSU 官方 4.14 补丁"
-              wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
-              patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
-              ;;
-            kernelsu_next)
-              echo "KSU_LOG: 下载并应用 KernelSU Next 官方 4.14 补丁"
-              wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
-              patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
-              ;;
-            bakasu)
-              echo "KSU_LOG: 下载并应用 BakaSU (ReSukiSU) 官方 4.14 补丁"
-              wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch
-              patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
-              ;;
-          esac
 
       - name: 启用 SUSFS（仅 BakaSU）
         if: env.ENABLE_SUSFS == 'true' && env.ROOT_TYPE == 'bakasu'
