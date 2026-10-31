@@ -870,7 +870,8 @@ jobs:
                 .[]
                 | . as $rel
                 | .assets[]?
-                | select(.name | test("-arm64-v8a-release\\.apk$"; "i"))
+                | select(.name | test("-release\\.apk$"; "i"))
+                | select(.name | test("-spoofed_.*-release\\.apk$"; "i") | not)
                 | select(
                     (.name               | contains($mv))
                     or ($rel.tag_name    | contains($mv))
@@ -889,7 +890,7 @@ jobs:
             MATCHED_TAG=$(echo "$ASSET_JSON"  | jq -r '.tag  // empty')
 
             if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-              echo "警告: 未找到匹配 ${MV_CLEAN} 的 *-arm64-v8a-release.apk，跳过 ${root}"
+              echo "警告: 未找到匹配 ${MV_CLEAN} 的 *-release.apk，跳过 ${root}"
               continue
             fi
 
