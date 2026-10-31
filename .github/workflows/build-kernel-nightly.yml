@@ -3,7 +3,7 @@ name: Schedule Trigger for Build Kernel
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: '0 0 * * 1,4,0'
 
 jobs:
   dispatch:
@@ -11,8 +11,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
     steps:
-      # ========== 仅一波：Bakasu 构建，5 个并行 ==========
-      - name: 并行触发 Bakasu 构建
+      - name: 并行触发 BakaSU 构建
         run: |
           set -euo pipefail
 
@@ -26,17 +25,10 @@ jobs:
           }
 
           pids=()
-          trigger "BakaSU + BBR" \
-            -f enable_bakasu=true \
-            -f enable_bbr=true & pids+=("$!")
           trigger "BakaSU + BBR + NoMount" \
             -f enable_bakasu=true \
             -f enable_bbr=true \
             -f enable_nomount=true & pids+=("$!")
-          trigger "BakaSU + BBR + SUSFS" \
-            -f enable_bakasu=true \
-            -f enable_bbr=true \
-            -f enable_susfs=true & pids+=("$!")
           trigger "BakaSU + BBR + SUSFS + NoMount" \
             -f enable_bakasu=true \
             -f enable_bbr=true \
