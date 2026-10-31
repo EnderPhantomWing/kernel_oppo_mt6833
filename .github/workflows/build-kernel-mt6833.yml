@@ -117,7 +117,7 @@ jobs:
           if [ "$ENABLE_KVM" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-KVM"; fi
           
           if [ "$ENABLE_BBR" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-BBR"; fi
-          if [ "$ENABLE_DROIDSPACE" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-DroidSpace" fi
+          if [ "$ENABLE_DROIDSPACE" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-DroidSpace"; fi
           if [ "$ENABLE_SUSFS" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-SUSFS"; fi
           if [ "$ENABLE_NOMOUNT" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-NoMount"; fi
 
