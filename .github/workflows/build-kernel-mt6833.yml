@@ -763,6 +763,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: 下载 BakaSU Manager APK
+        if: contains(needs.setup.outputs.matrix, 'bakasu')
         env:
           GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
         continue-on-error: true
@@ -773,6 +774,77 @@ jobs:
 
           echo "===== 获取 BakaSU_CI releases 列表 ====="
           RELEASES_JSON=$(gh api --paginate --slurp /repos/EnderPhantomWing/BakaSU_CI/releases | jq -c 'add // []')
+          echo "共获取 release 数量: $(echo "$RELEASES_JSON" | jq 'length')"
+
+          echo "$MATRIX" | jq -r '.[] | [.root, .artifact] | @tsv' | while IFS=$'\t' read -r root artifact; do
+            MV_FILE="artifacts/manager_version_${root}.txt"
+            if [ ! -f "$MV_FILE" ]; then
+              echo "跳过 ${root}: 未找到 manager 版本文件"
+              continue
+            fi
+
+            MV=$(tr -d '[:space:]' < "$MV_FILE")
+            if [ -z "$MV" ]; then
+              echo "跳过 ${root}: manager 版本为空"
+              continue
+            fi
+
+            MV_CLEAN="${MV#v}"
+            MV_CLEAN="${MV_CLEAN#V}"
+
+            echo "----- 处理 root=${root}, 版本=${MV_CLEAN} -----"
+
+            ASSET_JSON=$(echo "$RELEASES_JSON" | jq -c --arg mv "$MV_CLEAN" '
+              [
+                .[]
+                | . as $rel
+                | .assets[]?
+                | select(.name | test("-arm64-v8a-release\\.apk$"; "i"))
+                | select(
+                    (.name               | contains($mv))
+                    or ($rel.tag_name    | contains($mv))
+                    or (($rel.name // "") | contains($mv))
+                  )
+                | {
+                    tag:  $rel.tag_name,
+                    name: .name,
+                    url:  .browser_download_url
+                  }
+              ] | first // empty
+            ')
+
+            DOWNLOAD_URL=$(echo "$ASSET_JSON" | jq -r '.url  // empty')
+            ASSET_NAME=$(echo "$ASSET_JSON"   | jq -r '.name // empty')
+            MATCHED_TAG=$(echo "$ASSET_JSON"  | jq -r '.tag  // empty')
+
+            if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
+              echo "警告: 未找到匹配 ${MV_CLEAN} 的 *-arm64-v8a-release.apk，跳过 ${root}"
+              continue
+            fi
+
+            echo "命中 tag=${MATCHED_TAG} 资产=${ASSET_NAME}"
+            echo "下载 ${DOWNLOAD_URL} -> artifacts/apks/${ASSET_NAME}"
+            curl -fL --retry 3 --retry-delay 5 \
+              -o "artifacts/apks/${ASSET_NAME}" \
+              "$DOWNLOAD_URL"
+            ls -lh "artifacts/apks/${ASSET_NAME}"
+          done
+
+          echo "===== artifacts/apks 内容 ====="
+          ls -lh artifacts/apks/ || true
+
+      - name: 下载 KernelSU-Next Manager APK
+        if: contains(needs.setup.outputs.matrix, 'kernelsu_next')
+        env:
+          GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          MATRIX='${{ needs.setup.outputs.matrix }}'
+          mkdir -p artifacts/apks
+
+          echo "===== 获取 KernelSU_Next_CI releases 列表 ====="
+          RELEASES_JSON=$(gh api --paginate --slurp /repos/EnderPhantomWing/KernelSU_Next_CI/releases | jq -c 'add // []')
           echo "共获取 release 数量: $(echo "$RELEASES_JSON" | jq 'length')"
 
           echo "$MATRIX" | jq -r '.[] | [.root, .artifact] | @tsv' | while IFS=$'\t' read -r root artifact; do
