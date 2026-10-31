@@ -127,9 +127,7 @@ jobs:
           
           if [ "$ENABLE_BBR" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-BBR"; fi
           if [ "$ENABLE_DROIDSPACE" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-DroidSpace"; fi
-          if [ "$ENABLE_SUSFS" = "true" ] && [ "$ROOT_TYPE" = "bakasu" ]; then
-            if [ "$ENABLE_SUSFS" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-SUSFS"; fi
-          fi
+          if [ "$ENABLE_SUSFS" = "true" ] && [ "$ROOT_TYPE" = "bakasu" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-SUSFS"; fi
           if [ "$ENABLE_NOMOUNT" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-NoMount"; fi
 
           if [ "$COUNT" -gt 1 ]; then
