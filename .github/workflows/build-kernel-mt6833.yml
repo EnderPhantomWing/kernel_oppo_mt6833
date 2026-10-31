@@ -656,7 +656,7 @@ jobs:
           # 注：以 make 启动时刻近似 "构建完成时间"，保证 uname -r 可控
           BUILD_TIME=$(date -u +%Y%m%dT%H%M%SZ)
           COMMIT_SHORT=${GITHUB_SHA:0:10}
-          RUN_NUMBER=$(printf "%05d" "${{ github.run_number }}")
+          RUN_NUMBER="${{ github.run_number }}
           export LOCALVERSION="-g${COMMIT_SHORT}-r${RUN_NUMBER}-${BUILD_TIME}"
           echo "LOCALVERSION=${LOCALVERSION}"
 
