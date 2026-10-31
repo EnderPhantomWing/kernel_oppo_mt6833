@@ -127,7 +127,9 @@ jobs:
           
           if [ "$ENABLE_BBR" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-BBR"; fi
           if [ "$ENABLE_DROIDSPACE" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-DroidSpace"; fi
-          if [ "$ENABLE_SUSFS" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-SUSFS"; fi
+          if [ "$ENABLE_SUSFS" = "true" ] && [ "$ROOT_TYPE" = "bakasu" ]; then
+            if [ "$ENABLE_SUSFS" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-SUSFS"; fi
+          fi
           if [ "$ENABLE_NOMOUNT" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-NoMount"; fi
 
           if [ "$COUNT" -gt 1 ]; then
@@ -255,7 +257,7 @@ jobs:
         run: |
           set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          if [ "$ENABLE_SUSFS" = "true" ]; then
+          if [ "$ENABLE_SUSFS" = "true" ] && [ "$ROOT_TYPE" = "bakasu" ]; then
             echo "KSU_LOG: 启用 SUSFS，跳过 kernel-4.14.patch，稍后由 susfs_inline_hook_patches.sh 注入钩子"
           else
             case "$ROOT_TYPE" in
@@ -338,7 +340,7 @@ jobs:
             curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
           fi
 
-          if [ "$ENABLE_SUSFS" = "true" ]; then
+          if [ "$ENABLE_SUSFS" = "true" ] && [ "$ROOT_TYPE" = "bakasu" ]; then
             echo "KSU_LOG: 应用 SUSFS 内联钩子（对应 CONFIG_KSU_SUSFS choice）"
             curl -LfsS \
               https://raw.githubusercontent.com/JackA1ltman/NonGKI_Kernel_Build_2nd/mainline/Patches/susfs_inline_hook_patches.sh \
@@ -520,13 +522,22 @@ jobs:
 
           # SU Hook Method
           if [ "$ENABLE_SUSFS" = "true" ]; then
-            echo "KSU_LOG: BakaSU choice 互斥，启用 CONFIG_KSU_SUSFS，不启用 CONFIG_KSU_MANUAL_HOOK"
-            ./scripts/config --file out/.config \
-              --enable CONFIG_KSU \
-              --enable CONFIG_KSU_SUSFS \
-              --disable CONFIG_KSU_MANUAL_HOOK \
-              --disable CONFIG_KSU_TRACEPOINT_HOOK \
-              --disable CONFIG_KSU_SUSFS_SUS_SU
+            if [ "$ROOT_TYPE" = "bakasu" ]; then
+              echo "KSU_LOG: BakaSU choice 互斥，启用 CONFIG_KSU_SUSFS，不启用 CONFIG_KSU_MANUAL_HOOK"
+              ./scripts/config --file out/.config \
+                --enable CONFIG_KSU \
+                --enable CONFIG_KSU_SUSFS \
+                --disable CONFIG_KSU_MANUAL_HOOK \
+                --disable CONFIG_KSU_TRACEPOINT_HOOK \
+                --disable CONFIG_KSU_SUSFS_SUS_SU
+            else
+              echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK (RKSU & KernelSU-Next)"
+              ./scripts/config --file out/.config \
+                --enable CONFIG_KSU \
+                --enable CONFIG_KSU_MANUAL_HOOK \
+                --disable CONFIG_KSU_TRACEPOINT_HOOK \
+                --disable CONFIG_KSU_SUSFS_SUS_SU
+            fi
           else
             echo "KSU_LOG: 启用 CONFIG_KSU + CONFIG_KSU_MANUAL_HOOK (non-SUSFS)"
             ./scripts/config --file out/.config \
