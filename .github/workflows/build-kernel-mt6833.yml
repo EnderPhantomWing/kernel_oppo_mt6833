@@ -432,7 +432,7 @@ jobs:
           fi
 
           # DroidSpace
-          if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
+          if [ "${{ inputs.enable_droidspace }}" = "true" ]; then
             echo "启用 DroidSpace..."
             ./scripts/config --file out/.config \
               --enable CONFIG_SYSCTL \
@@ -548,7 +548,7 @@ jobs:
           fi
 
           # DroidSpace 需要 USER_NS (docker unsafe procfs 修复)，仅在启用时保留
-          if [ "${{ github.event.inputs.DroidSpace }}" = "true" ]; then
+          if [ "${{ inputs.enable_droidspace }}" = "true" ]; then
             ./scripts/config --file out/.config \
                     --enable CONFIG_NAMESPACES \
                     --enable CONFIG_DEVTMPFS \
@@ -574,7 +574,10 @@ jobs:
 
           if [ "$ENABLE_SUSFS" = "true" ]; then
             grep -qx 'CONFIG_KSU=y' out/.config || { echo "CONFIG_KSU 未启用，终止编译"; exit 1; }
-            grep -qx 'CONFIG_KSU_SUSFS=y' out/.config || { echo "CONFIG_KSU_SUSFS 未启用，终止编译"; exit 1; }
+            # 仅在 bakasu 时要求 CONFIG_KSU_SUSFS
+            if [ "$ROOT_TYPE" = "bakasu" ]; then
+              grep -qx 'CONFIG_KSU_SUSFS=y' out/.config || { echo "CONFIG_KSU_SUSFS 未启用，终止编译"; exit 1; }
+            fi
 
             if grep -qx 'CONFIG_KSU_MANUAL_HOOK=y' out/.config; then
               echo "CONFIG_KSU_MANUAL_HOOK 与 CONFIG_KSU_SUSFS 在 BakaSU choice 中互斥，不能同时启用"
