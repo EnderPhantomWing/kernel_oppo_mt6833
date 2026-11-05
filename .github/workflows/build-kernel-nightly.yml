@@ -25,10 +25,10 @@ jobs:
           }
 
           pids=()
-          trigger "BakaSU + BBR + NoMount" \
-            -f enable_bakasu=true \
-            -f enable_bbr=true \
-            -f enable_nomount=true & pids+=("$!")
+          # trigger "BakaSU + BBR + NoMount" \
+          #   -f enable_bakasu=true \
+          #   -f enable_bbr=true \
+          #   -f enable_nomount=true & pids+=("$!")
           trigger "BakaSU + BBR + SUSFS + NoMount" \
             -f enable_bakasu=true \
             -f enable_bbr=true \
