@@ -174,7 +174,8 @@ jobs:
 
           # ========= 7. 生成 Release Tag =========
           # 格式：PFGM00-<date>-r<run>-<base>[-<features>]
-          TAG="PFGM00-$(date -u +'%Y%m%d')-r${RUN_NUMBER}-${BASE}${TAG_FEATURES}"
+          # PFGM00-$(date -u +'%Y%m%d')-r${RUN_NUMBER}-${BASE}${TAG_FEATURES}
+          TAG="r${RUN_NUMBER}"
 
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           echo "total=$COUNT" >> "$GITHUB_OUTPUT"
