@@ -818,7 +818,7 @@ jobs:
           mkdir -p artifacts/apks
 
           echo "===== 获取 BakaSU_CI releases 列表 ====="
-          RELEASES_JSON=$(gh api --paginate --slurp /repos/EnderPhantomWing/BakaSU_CI/releases | jq -c 'add // []')
+          RELEASES_JSON=$(gh api --paginate --slurp /repos/EnderUnion/BakaSU_CI/releases | jq -c 'add // []')
           echo "共获取 release 数量: $(echo "$RELEASES_JSON" | jq 'length')"
 
           echo "$MATRIX" | jq -r '.[] | [.root, .artifact] | @tsv' | while IFS=$'\t' read -r root artifact; do
@@ -889,7 +889,7 @@ jobs:
           mkdir -p artifacts/apks
 
           echo "===== 获取 KernelSU_Next_CI releases 列表 ====="
-          RELEASES_JSON=$(gh api --paginate --slurp /repos/EnderPhantomWing/KernelSU_Next_CI/releases | jq -c 'add // []')
+          RELEASES_JSON=$(gh api --paginate --slurp /repos/EnderUnion/KernelSU_Next_CI/releases | jq -c 'add // []')
           echo "共获取 release 数量: $(echo "$RELEASES_JSON" | jq 'length')"
 
           echo "$MATRIX" | jq -r '.[] | [.root, .artifact] | @tsv' | while IFS=$'\t' read -r root artifact; do
