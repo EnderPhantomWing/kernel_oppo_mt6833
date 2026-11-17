@@ -270,9 +270,19 @@ jobs:
 
       - name: 下载内核源码
         run: |
+          set -e
           cd $GITHUB_WORKSPACE/kernel_workspace
-          git clone -b "$BRANCH" \
-            https://github.com/EnderPhantomWing/kernel_oppo_mt6833.git android-kernel
+          # 优先使用「当前仓库」的源码，这样在本仓库里改 defconfig / 驱动补丁才会真正生效；
+          # 只有在当前仓库拉不到该分支时才回退到上游仓库。
+          if git clone -b "$BRANCH" "https://github.com/${GITHUB_REPOSITORY}.git" android-kernel; then
+            echo "内核源码来源: ${GITHUB_REPOSITORY} (${BRANCH})"
+          else
+            echo "WARN: 当前仓库拉取 ${BRANCH} 失败，回退到上游仓库"
+            rm -rf android-kernel
+            git clone -b "$BRANCH" \
+              https://github.com/EnderPhantomWing/kernel_oppo_mt6833.git android-kernel
+            echo "内核源码来源: EnderPhantomWing/kernel_oppo_mt6833 (${BRANCH})"
+          fi
 
       - name: 设置 ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -640,6 +650,119 @@ jobs:
             exit 1
           fi
 
+      # ==================================================================
+      # 热点 / 网络共享 (Tethering) 加固
+      #
+      # Android 12 的 netd 在打开热点时会依次往 iptables / ip6tables 写：
+      #   filter : tetherctrl_FORWARD
+      #   nat    : tetherctrl_nat_POSTROUTING -j MASQUERADE
+      #   mangle : -p tcp --tcp-flags SYN SYN -j TCPMSS --clamp-mss-to-pmtu
+      #   raw    : -m rpfilter --invert ! -s fe80::/64 -j DROP   (IPv6, 失败=直接放弃开启)
+      # 上述任意一条在内核里缺失，热点开关就会「打不开 / 自动弹回 / 一直转圈」，
+      # 而 WiFi 本身（STA 模式）完全正常 —— 因为没有 netfilter 也一样能上网。
+      # 这里把整套依赖补齐并强制为内置 (=y)，避免默认值把它变成 m 而没有 .ko 可加载。
+      # ==================================================================
+      - name: 热点 / 网络共享 (Tethering) 配置加固
+        run: |
+          set -e
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+
+          ./scripts/config --file out/.config \
+            --enable CONFIG_NETFILTER \
+            --enable CONFIG_NETFILTER_ADVANCED \
+            --enable CONFIG_NETFILTER_XTABLES \
+            --enable CONFIG_NF_CONNTRACK \
+            --enable CONFIG_NF_CONNTRACK_MARK \
+            --enable CONFIG_NF_CONNTRACK_FTP \
+            --enable CONFIG_NF_CONNTRACK_PPTP \
+            --enable CONFIG_NF_CONNTRACK_EVENTS \
+            --enable CONFIG_NF_NAT \
+            --enable CONFIG_NF_NAT_REDIRECT \
+            --enable CONFIG_NETFILTER_XT_NAT \
+            --enable CONFIG_NETFILTER_XT_TARGET_REDIRECT \
+            --enable CONFIG_NETFILTER_XT_TARGET_TCPMSS \
+            --enable CONFIG_NETFILTER_XT_TARGET_CT \
+            --enable CONFIG_NETFILTER_XT_TARGET_MARK \
+            --enable CONFIG_NETFILTER_XT_MATCH_STATE \
+            --enable CONFIG_NETFILTER_XT_MATCH_CONNTRACK \
+            --enable CONFIG_NETFILTER_XT_MATCH_CONNBYTES \
+            --enable CONFIG_NETFILTER_XT_MATCH_OWNER \
+            --enable CONFIG_NETFILTER_XT_MATCH_SOCKET \
+            --enable CONFIG_NETFILTER_XT_MATCH_MARK \
+            --enable CONFIG_NETFILTER_XT_MATCH_COMMENT \
+            --enable CONFIG_NETFILTER_XT_MATCH_ADDRTYPE \
+            --enable CONFIG_NETFILTER_XT_MATCH_MULTIPORT \
+            --enable CONFIG_NETFILTER_XT_MATCH_HASHLIMIT \
+            --enable CONFIG_NETFILTER_XT_MATCH_BPF \
+            --enable CONFIG_NETFILTER_XT_MATCH_QUOTA2 \
+            --enable CONFIG_NETFILTER_XT_MATCH_LIMIT \
+            --enable CONFIG_NETFILTER_XT_TARGET_IDLETIMER \
+            --enable CONFIG_NETFILTER_XT_TARGET_LOG \
+            --enable CONFIG_IP_NF_IPTABLES \
+            --enable CONFIG_IP_NF_FILTER \
+            --enable CONFIG_IP_NF_NAT \
+            --enable CONFIG_IP_NF_TARGET_MASQUERADE \
+            --enable CONFIG_IP_NF_TARGET_REJECT \
+            --enable CONFIG_IP_NF_MANGLE \
+            --enable CONFIG_IP_NF_RAW \
+            --enable CONFIG_IP_NF_MATCH_RPFILTER \
+            --enable CONFIG_NF_NAT_IPV4 \
+            --enable CONFIG_NF_NAT_MASQUERADE_IPV4 \
+            --enable CONFIG_IP6_NF_IPTABLES \
+            --enable CONFIG_IP6_NF_FILTER \
+            --enable CONFIG_IP6_NF_MANGLE \
+            --enable CONFIG_IP6_NF_RAW \
+            --enable CONFIG_IP6_NF_MATCH_RPFILTER \
+            --enable CONFIG_IP6_NF_TARGET_REJECT \
+            --enable CONFIG_NF_NAT_IPV6 \
+            --enable CONFIG_NF_NAT_MASQUERADE_IPV6 \
+            --enable CONFIG_IP6_NF_NAT \
+            --enable CONFIG_IP6_NF_TARGET_MASQUERADE \
+            --enable CONFIG_IP_ADVANCED_ROUTER \
+            --enable CONFIG_IP_MULTIPLE_TABLES \
+            --enable CONFIG_IPV6_MULTIPLE_TABLES \
+            --enable CONFIG_BRIDGE \
+            --enable CONFIG_BRIDGE_NETFILTER
+
+          make -j$(nproc --all) O=out ARCH=arm64 olddefconfig
+
+      - name: 校验热点 / 网络共享关键配置
+        run: |
+          set -e
+          cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+
+          REQ="CONFIG_NETFILTER CONFIG_NETFILTER_XTABLES CONFIG_NF_CONNTRACK CONFIG_NF_NAT
+               CONFIG_IP_NF_IPTABLES CONFIG_IP_NF_FILTER CONFIG_IP_NF_NAT CONFIG_IP_NF_TARGET_MASQUERADE
+               CONFIG_IP_NF_MANGLE CONFIG_IP_NF_RAW CONFIG_IP_NF_MATCH_RPFILTER
+               CONFIG_NETFILTER_XT_TARGET_TCPMSS CONFIG_NETFILTER_XT_TARGET_CT
+               CONFIG_NETFILTER_XT_MATCH_STATE CONFIG_NETFILTER_XT_MATCH_CONNTRACK
+               CONFIG_NETFILTER_XT_MATCH_SOCKET CONFIG_NETFILTER_XT_MATCH_OWNER
+               CONFIG_NETFILTER_XT_MATCH_QUOTA2 CONFIG_NETFILTER_XT_TARGET_IDLETIMER
+               CONFIG_IP6_NF_IPTABLES CONFIG_IP6_NF_FILTER CONFIG_IP6_NF_MANGLE CONFIG_IP6_NF_RAW
+               CONFIG_IP6_NF_MATCH_RPFILTER CONFIG_NF_NAT_IPV6 CONFIG_IP6_NF_NAT
+               CONFIG_IP6_NF_TARGET_MASQUERADE CONFIG_NF_NAT_MASQUERADE_IPV6
+               CONFIG_IP_ADVANCED_ROUTER CONFIG_IP_MULTIPLE_TABLES CONFIG_BRIDGE"
+
+          MISS=""
+          for c in $REQ; do
+            grep -qx "$c=y" out/.config || MISS="$MISS $c"
+          done
+
+          echo "===== 热点相关 netfilter 配置 ====="
+          grep -E '^(# )?CONFIG_(NETFILTER|NF_|IP_NF|IP6_NF|IP_SET)' out/.config | sort || true
+
+          if [ -n "$MISS" ]; then
+            echo "❌ 热点关键内核配置缺失:$MISS"
+            echo "（热点会表现为：WiFi 正常，但热点开关打不开 / 自动弹回）"
+            exit 1
+          fi
+          echo "✅ 热点 / 网络共享关键配置齐全（全部内置 =y）"
+
+          cp out/.config "$GITHUB_WORKSPACE/kernel_workspace/config-${ARTIFACT_NAME}.txt"
+          grep -E '^(# )?CONFIG_(NETFILTER|NF_|IP_NF|IP6_NF|IP_SET)' out/.config | sort \
+            > "$GITHUB_WORKSPACE/kernel_workspace/netfilter-${ARTIFACT_NAME}.txt" || true
+
       - name: 构建内核
         run: |
           set -e
@@ -677,6 +800,21 @@ jobs:
           sed -i 's!block=/dev/block/by-name/boot;!block=auto;!g' AnyKernel3/anykernel.sh
           sed -i 's/is_slot_device=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
           cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+
+          # 本次编译若有 .ko（=m 选项），一并打包进 AK3 并通过 anykernel.sh 安装，
+          # 否则这些功能在设备上会「有配置、没驱动」。
+          if find android-kernel/out -name '*.ko' -type f | grep -q .; then
+            mkdir -p AnyKernel3/modules/system/lib/modules
+            rm -f AnyKernel3/modules/system/lib/modules/placeholder
+            find android-kernel/out -name '*.ko' -type f -exec cp {} AnyKernel3/modules/system/lib/modules/ \;
+            sed -i 's/do.modules=0/do.modules=1/' AnyKernel3/anykernel.sh
+            echo "===== 已打包进 AK3 的内核模块 ====="
+            ls -l AnyKernel3/modules/system/lib/modules
+          else
+            sed -i 's/do.modules=1/do.modules=0/' AnyKernel3/anykernel.sh || true
+            echo "本次编译没有生成 .ko 模块（全部内置）"
+          fi
+
           rm -rf AnyKernel3/.git* AnyKernel3/README.md
 
           ZIP_NAME="AK3-${ARTIFACT_NAME}.zip"
@@ -753,6 +891,19 @@ jobs:
           path: |
             kernel_workspace/kernel_version_${{ matrix.root }}.txt
             kernel_workspace/manager_version_${{ matrix.root }}.txt
+          if-no-files-found: warn
+
+      # 排障用：保留本次构建的完整 .config、热点相关配置清单与 System.map，
+      # 下次「某功能失效」时可以直接 diff，而不用重新反编译内核镜像去抠配置。
+      - name: 上传构建配置与内核符号表
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-config-${{ matrix.root }}
+          path: |
+            kernel_workspace/config-*.txt
+            kernel_workspace/netfilter-*.txt
+            kernel_workspace/android-kernel/out/System.map
           if-no-files-found: warn
 
   # ================================
