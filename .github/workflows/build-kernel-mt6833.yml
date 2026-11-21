@@ -234,39 +234,21 @@ jobs:
           which ld || echo "WARN: 系统 ld not found"
           ld --version 2>/dev/null | head -n1 || true
 
-      - name: 下载 GCC / Clang 工具链
+      - name: 下载 GCC 编译器
         run: |
-          set -e
           cd $GITHUB_WORKSPACE/kernel_workspace
-
-          mkdir -p gcc64 gcc32 clang-aosp
-
-          # 64 位 GCC 工具链
-          wget -O gcc-aarch64.tar.gz --tries=3 --timeout=30 \
-            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz \
-            || wget -O gcc-aarch64.tar.gz --tries=3 --timeout=30 \
-            https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/aarch64-linux-android-4.9-refs_tags_android-12.1.0_r27.tar.gz
-          tar -C gcc64/ -zxf gcc-aarch64.tar.gz
-
-          # 32 位 GCC 工具链
-          wget -O gcc-arm.tar.gz --tries=3 --timeout=30 \
-            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz \
-            || wget -O gcc-arm.tar.gz --tries=3 --timeout=30 \
-            https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/arm-linux-androideabi-4.9-refs_tags_android-12.1.0_r27.tar.gz
-          tar -C gcc32/ -zxf gcc-arm.tar.gz
-
-          # Clang 工具链 (AOSP)
-          git clone -q --depth=1 \
-            https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 \
-            -b 10.0 clang-aosp
-
-          echo "===== 工具链目录检查（仅供参考，不阻断构建）====="
-          ls -l gcc64/bin/aarch64-linux-android-gcc 2>/dev/null || \
-            echo "WARN: gcc64/bin/aarch64-linux-android-gcc 不存在（内核主要由 clang 构建，可忽略）"
-          ls -l gcc32/bin/arm-linux-androideabi-gcc 2>/dev/null || \
-            echo "WARN: gcc32/bin/arm-linux-androideabi-gcc 不存在（内核主要由 clang 构建，可忽略）"
-          ls -l clang-aosp/bin/ld.lld 2>/dev/null || \
-            echo "WARN: clang-aosp/bin/ld.lld not found"
+          mkdir gcc64
+          wget -O gcc-aarch64.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+          tar -C gcc64/ -zxvf gcc-aarch64.tar.gz
+          mkdir gcc32
+          wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+          tar -C gcc32/ -zxvf gcc-arm.tar.gz
+          
+      - name: 下载 Clang 编译器
+        run: |
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          mkdir clang-aosp
+          git clone -q --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 -b 10.0 clang-aosp
 
       - name: 下载内核源码
         run: |
