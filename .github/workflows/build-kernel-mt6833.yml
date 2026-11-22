@@ -243,12 +243,42 @@ jobs:
           mkdir gcc32
           wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
           tar -C gcc32/ -zxvf gcc-arm.tar.gz
-          
+
       - name: 下载 Clang 编译器
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
-          mkdir clang-aosp
-          git clone -q --depth=1 https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 -b 10.0 clang-aosp
+          mkdir -p clang-aosp
+          git clone -q --depth=1 -b 10.0 \
+            https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 \
+            clang-aosp
+          # 可选：固定 commit 提高可复现性（示例，按需替换 <commit>）
+          # (cd clang-aosp && git fetch --depth=1 origin <commit> && git checkout FETCH_HEAD)
+
+      - name: 验证工具链
+        run: |
+          set -e
+          export PATH="$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH"
+
+          echo "===== Clang ====="
+          command -v clang  || { echo "ERROR: clang 不在 PATH"; exit 1; }
+          command -v ld.lld || { echo "ERROR: ld.lld 不在 PATH"; exit 1; }
+          clang --version | head -n1
+          ld.lld --version | head -n1
+
+          echo "===== GCC 64 (aarch64-linux-android-4.9) ====="
+          command -v aarch64-linux-android-ld      || { echo "ERROR: aarch64-linux-android-ld 不在 PATH"; exit 1; }
+          command -v aarch64-linux-android-objcopy || { echo "ERROR: aarch64-linux-android-objcopy 不在 PATH"; exit 1; }
+          aarch64-linux-android-ld --version | head -n1
+          aarch64-linux-android-gcc --version 2>/dev/null | head -n1 \
+            || echo "INFO: aarch64-linux-android-gcc 不存在（CC=clang，可忽略）"
+
+          echo "===== GCC 32 (arm-linux-androideabi-4.9) ====="
+          command -v arm-linux-androideabi-ld || { echo "ERROR: arm-linux-androideabi-ld 不在 PATH"; exit 1; }
+          arm-linux-androideabi-ld --version | head -n1
+
+          echo "===== ccache ====="
+          command -v ccache || { echo "ERROR: ccache 不在 PATH"; exit 1; }
+          ccache --version | head -n1
 
       - name: 下载内核源码
         run: |
@@ -404,19 +434,29 @@ jobs:
         run: |
           set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+          export PATH="$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH"
 
-          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+          echo "===== 环境检查（硬校验） ====="
+          command -v clang  || { echo "ERROR: clang 缺失"; exit 1; }
+          command -v ld.lld || { echo "ERROR: ld.lld 缺失"; exit 1; }
+          command -v ccache || { echo "ERROR: ccache 缺失"; exit 1; }
+          clang  --version | head -n1
+          ld.lld --version | head -n1
+          command -v aarch64-linux-android-ld      || { echo "ERROR: aarch64-linux-android-ld 缺失"; exit 1; }
+          command -v arm-linux-androideabi-ld      || { echo "ERROR: arm-linux-androideabi-ld 缺失"; exit 1; }
 
-          echo "===== 环境检查 ====="
-          which clang || true
-          which ld.lld || true
-          which aarch64-linux-android-gcc || echo "WARN: aarch64-linux-android-gcc 不在 PATH（可忽略）"
-          which arm-linux-androideabi-gcc || echo "WARN: arm-linux-androideabi-gcc 不在 PATH（可忽略）"
-          clang --version | head -n1 || true
-          ld.lld --version | head -n1 || true
+          # 统一工具链参数（与「构建内核」保持一致）
+          TOOLCHAIN_ARGS=(
+            "CC=ccache clang"
+            "HOSTCC=clang"
+            "HOSTCXX=clang++"
+            "LD=ld.lld"
+            "CLANG_TRIPLE=aarch64-linux-gnu-"
+            "CROSS_COMPILE=aarch64-linux-android-"
+            "CROSS_COMPILE_ARM32=arm-linux-androideabi-"
+          )
 
-          # ========== Deprecated ==========
-          # KVM
+          # ========== Deprecated: KVM ==========
           if [ "$ENABLE_KVM" = "true" ]; then
             cat >> arch/arm64/configs/PFGM00_defconfig <<'EOF'
           CONFIG_VIRTUALIZATION=y
@@ -428,13 +468,7 @@ jobs:
           # ================================
 
           make -j$(nproc --all) O=out ARCH=arm64 \
-            CC=clang \
-            HOSTCC=clang \
-            HOSTCXX=clang++ \
-            LD=ld.lld \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            "${TOOLCHAIN_ARGS[@]}" \
             PFGM00_defconfig
 
           # BBR
@@ -524,12 +558,12 @@ jobs:
               --disable CONFIG_ANDROID_PARANOID_NETWORK
           fi
 
-          # ========== Deprecated ==========
-          # LXC/Docker
+          # ========== Deprecated: LXC/Docker ==========
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
             echo "KCFLAGS_EXTRA=-Wno-error=sizeof-array-div" >> "$GITHUB_ENV"
           else
-            echo "KCFLAGS_EXTRA=" >> "$GITHUB_ENV"
+            # 不写空值，构建阶段使用 ${KCFLAGS_EXTRA:-}
+            echo "KCFLAGS_EXTRA_DISABLED=1" >> "$GITHUB_ENV"
           fi
           # ================================
 
@@ -587,8 +621,9 @@ jobs:
               --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
           fi
 
+          # olddefconfig：与构建阶段一致的统一工具链
           make O=out ARCH=arm64 \
-            CC=clang HOSTCC=clang HOSTCXX=clang++ LD=ld.lld \
+            "${TOOLCHAIN_ARGS[@]}" \
             olddefconfig
 
           # 配置校验
@@ -626,25 +661,30 @@ jobs:
         run: |
           set -e
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-          export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH
+          export PATH="$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc64/bin:$GITHUB_WORKSPACE/kernel_workspace/gcc32/bin:$PATH"
           export KBUILD_BUILD_HOST=Github@EnderPhantomWing
           export KBUILD_BUILD_USER=EnderPhantomWing
 
           # LOCALVERSION：-g<commit>-r<run>-<BUILD_TIME>
           # BUILD_TIME 格式：yyyyMMddTHHMMSSZ（UTC，例如 20241027T123456Z）
-          # 注：以 make 启动时刻近似 "构建完成时间"，保证 uname -r 可控
           BUILD_TIME=$(date -u +%Y%m%dT%H%M%SZ)
           COMMIT_SHORT=${GITHUB_SHA:0:10}
           RUN_NUMBER=${{ github.run_number }}
           export LOCALVERSION="-g${COMMIT_SHORT}-r${RUN_NUMBER}-${BUILD_TIME}"
           echo "LOCALVERSION=${LOCALVERSION}"
 
-          make -j$(nproc --all) CC="ccache clang" O=out ARCH=arm64 \
+          KCFLAGS_VALUE="${KCFLAGS_EXTRA:-}"
+          echo "KCFLAGS=${KCFLAGS_VALUE}"
+
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            CC="ccache clang" \
+            HOSTCC=clang \
+            HOSTCXX=clang++ \
+            LD=ld.lld \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-android- \
             CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-            LD=ld.lld \
-            KCFLAGS="$KCFLAGS_EXTRA"
+            KCFLAGS="$KCFLAGS_VALUE"
 
           KERNEL_VERSION=$(make -s O=out ARCH=arm64 kernelrelease | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
           echo "KERNEL_VERSION=${KERNEL_VERSION}"
