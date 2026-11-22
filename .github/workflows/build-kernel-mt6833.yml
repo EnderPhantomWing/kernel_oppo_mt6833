@@ -238,10 +238,10 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
           mkdir gcc64
-          wget -O gcc-aarch64.tar.gz https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/aarch64-linux-android-4.9-refs_tags_android-12.1.0_r27.tar.gz
+          wget -O gcc-aarch64.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
           tar -C gcc64/ -zxvf gcc-aarch64.tar.gz
           mkdir gcc32
-          wget -O gcc-arm.tar.gz https://github.com/EnderPhantomWing/kernel_oppo_mt6833/releases/download/toolchain/arm-linux-androideabi-4.9-refs_tags_android-12.1.0_r27.tar.gz
+          wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
           tar -C gcc32/ -zxvf gcc-arm.tar.gz
 
       - name: 下载 Clang 编译器
@@ -275,6 +275,8 @@ jobs:
           echo "===== GCC 32 (arm-linux-androideabi-4.9) ====="
           command -v arm-linux-androideabi-ld || { echo "ERROR: arm-linux-androideabi-ld 不在 PATH"; exit 1; }
           arm-linux-androideabi-ld --version | head -n1
+          arm-linux-androideabi-gcc --version 2>/dev/null | head -n1 \
+            || echo "INFO: arm-linux-androideabi-gcc 不存在（CC=clang，可忽略）"
 
           echo "===== ccache ====="
           command -v ccache || { echo "ERROR: ccache 不在 PATH"; exit 1; }
@@ -442,18 +444,17 @@ jobs:
           command -v ccache || { echo "ERROR: ccache 缺失"; exit 1; }
           clang  --version | head -n1
           ld.lld --version | head -n1
-          command -v aarch64-linux-android-ld      || { echo "ERROR: aarch64-linux-android-ld 缺失"; exit 1; }
-          command -v arm-linux-androideabi-ld      || { echo "ERROR: arm-linux-androideabi-ld 缺失"; exit 1; }
 
-          # 统一工具链参数（与「构建内核」保持一致）
-          TOOLCHAIN_ARGS=(
+          # ==================================================================
+          # 参考 workflow 方案：配置阶段只传 CC/HOSTCC/HOSTCXX/LD，
+          # 不传 CROSS_COMPILE / CLANG_TRIPLE，避免 Kbuild 探测
+          # $(CROSS_COMPILE)gcc 时因该文件缺失而失败。
+          # ==================================================================
+          CONFIG_ARGS=(
             "CC=ccache clang"
             "HOSTCC=clang"
             "HOSTCXX=clang++"
             "LD=ld.lld"
-            "CLANG_TRIPLE=aarch64-linux-gnu-"
-            "CROSS_COMPILE=aarch64-linux-android-"
-            "CROSS_COMPILE_ARM32=arm-linux-androideabi-"
           )
 
           # ========== Deprecated: KVM ==========
@@ -468,7 +469,7 @@ jobs:
           # ================================
 
           make -j$(nproc --all) O=out ARCH=arm64 \
-            "${TOOLCHAIN_ARGS[@]}" \
+            "${CONFIG_ARGS[@]}" \
             PFGM00_defconfig
 
           # BBR
@@ -621,9 +622,9 @@ jobs:
               --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
           fi
 
-          # olddefconfig：与构建阶段一致的统一工具链
+          # olddefconfig：沿用 CONFIG_ARGS，仍不传 CROSS_COMPILE
           make O=out ARCH=arm64 \
-            "${TOOLCHAIN_ARGS[@]}" \
+            "${CONFIG_ARGS[@]}" \
             olddefconfig
 
           # 配置校验
@@ -676,14 +677,23 @@ jobs:
           KCFLAGS_VALUE="${KCFLAGS_EXTRA:-}"
           echo "KCFLAGS=${KCFLAGS_VALUE}"
 
+          # ==================================================================
+          # 参考 workflow 方案：仅在最终编译阶段注入完整交叉工具链参数。
+          # CC=ccache clang 优先，版本探测走 clang，不会 fallback 到
+          # $(CROSS_COMPILE)gcc；CROSS_COMPILE 仅供 binutils 使用。
+          # ==================================================================
+          BUILD_ARGS=(
+            "CC=ccache clang"
+            "HOSTCC=clang"
+            "HOSTCXX=clang++"
+            "LD=ld.lld"
+            "CLANG_TRIPLE=aarch64-linux-gnu-"
+            "CROSS_COMPILE=aarch64-linux-android-"
+            "CROSS_COMPILE_ARM32=arm-linux-androideabi-"
+          )
+
           make -j$(nproc --all) O=out ARCH=arm64 \
-            CC="ccache clang" \
-            HOSTCC=clang \
-            HOSTCXX=clang++ \
-            LD=ld.lld \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            "${BUILD_ARGS[@]}" \
             KCFLAGS="$KCFLAGS_VALUE"
 
           KERNEL_VERSION=$(make -s O=out ARCH=arm64 kernelrelease | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
