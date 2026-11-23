@@ -270,13 +270,13 @@ jobs:
           command -v aarch64-linux-android-objcopy || { echo "ERROR: aarch64-linux-android-objcopy 不在 PATH"; exit 1; }
           aarch64-linux-android-ld --version | head -n1
           aarch64-linux-android-gcc --version 2>/dev/null | head -n1 \
-            || echo "INFO: aarch64-linux-android-gcc 不存在（CC=clang，可忽略）"
+            || echo "INFO: aarch64-linux-android-gcc 不存在（配置阶段不传 CROSS_COMPILE，可忽略）"
 
           echo "===== GCC 32 (arm-linux-androideabi-4.9) ====="
           command -v arm-linux-androideabi-ld || { echo "ERROR: arm-linux-androideabi-ld 不在 PATH"; exit 1; }
           arm-linux-androideabi-ld --version | head -n1
           arm-linux-androideabi-gcc --version 2>/dev/null | head -n1 \
-            || echo "INFO: arm-linux-androideabi-gcc 不存在（CC=clang，可忽略）"
+            || echo "INFO: arm-linux-androideabi-gcc 不存在（配置阶段不传 CROSS_COMPILE，可忽略）"
 
           echo "===== ccache ====="
           command -v ccache || { echo "ERROR: ccache 不在 PATH"; exit 1; }
@@ -447,8 +447,15 @@ jobs:
 
           # ==================================================================
           # 参考 workflow 方案：配置阶段只传 CC/HOSTCC/HOSTCXX/LD，
-          # 不传 CROSS_COMPILE / CLANG_TRIPLE，避免 Kbuild 探测
-          # $(CROSS_COMPILE)gcc 时因该文件缺失而失败。
+          # 不传 CROSS_COMPILE / CLANG_TRIPLE。
+          #
+          # 原因：4.14 顶层 Makefile 中 CC = $(CROSS_COMPILE)gcc。
+          # 若不传 CC 且不传 CROSS_COMPILE，则 CC 展开为 "gcc"，
+          # 交给 shell 后由 $PATH 找到系统 /usr/bin/gcc，探测成功。
+          # 若传了 CROSS_COMPILE=aarch64-linux-android-，则 CC 展开为
+          # "aarch64-linux-android-gcc"，而 gcc64/bin 中通常只有 binutils
+          # （ld/objcopy/ar 等），没有 gcc 本体，子 make 探测时报
+          # "aarch64-linux-android-gcc: No such file or directory"。
           # ==================================================================
           CONFIG_ARGS=(
             "CC=ccache clang"
@@ -679,8 +686,11 @@ jobs:
 
           # ==================================================================
           # 参考 workflow 方案：仅在最终编译阶段注入完整交叉工具链参数。
-          # CC=ccache clang 优先，版本探测走 clang，不会 fallback 到
-          # $(CROSS_COMPILE)gcc；CROSS_COMPILE 仅供 binutils 使用。
+          #
+          # 此时 CC 被命令行覆盖为 "ccache clang"，Kbuild 的版本探测、
+          # 特性探测全部走 clang，不会 fallback 到 $(CROSS_COMPILE)gcc。
+          # CROSS_COMPILE 仅供 binutils 使用（ld/objcopy/ar 等），
+          # 这些文件在 gcc64/bin / gcc32/bin 中存在。
           # ==================================================================
           BUILD_ARGS=(
             "CC=ccache clang"
@@ -785,6 +795,19 @@ jobs:
           path: |
             kernel_workspace/kernel_version_${{ matrix.root }}.txt
             kernel_workspace/manager_version_${{ matrix.root }}.txt
+          if-no-files-found: warn
+
+      # 排障用：保留本次构建的完整 .config、热点相关配置清单与 System.map，
+      # 下次「某功能失效」时可以直接 diff，而不用重新反编译内核镜像去抠配置。
+      - name: 上传构建配置与内核符号表
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-config-${{ matrix.root }}
+          path: |
+            kernel_workspace/config-*.txt
+            kernel_workspace/netfilter-*.txt
+            kernel_workspace/android-kernel/out/System.map
           if-no-files-found: warn
 
   # ================================
