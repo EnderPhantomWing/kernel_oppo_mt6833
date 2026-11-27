@@ -1,0 +1,40 @@
+name: Schedule Trigger for Build Kernel (UTC every Sunday)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
+    steps:
+      - name: 并行触发 BakaSU 构建
+        run: |
+          set -euo pipefail
+
+          trigger() {
+            local desc="$1"
+            shift
+            echo "触发: ${desc}"
+            gh workflow run build-kernel-mt6833.yml \
+              --repo "${{ github.repository }}" \
+              "$@"
+          }
+
+          pids=()
+          # trigger "BakaSU + BBR + NoMount" \
+          #   -f enable_bakasu=true \
+          #   -f enable_bbr=true \
+          #   -f enable_nomount=true & pids+=("$!")
+          trigger "BakaSU + BBR + SUSFS + NoMount" \
+            -f enable_bakasu=true \
+            -f enable_bbr=true \
+            -f enable_susfs=true \
+            -f enable_nomount=true & pids+=("$!")
+
+          for pid in "${pids[@]}"; do
+            wait "$pid"
+          done
