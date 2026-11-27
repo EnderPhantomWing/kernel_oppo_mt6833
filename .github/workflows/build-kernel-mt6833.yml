@@ -836,66 +836,6 @@ jobs:
           if-no-files-found: warn
 
       # ================================================================
-      # 下载 Manager APK（仅 bakasu / kernelsu_next，供 Telegram 上传）
-      # ================================================================
-      - name: 下载 Manager APK（供 Telegram 上传）
-        if: ${{ inputs.tg && (matrix.root == 'bakasu' || matrix.root == 'kernelsu_next') }}
-        env:
-          GH_TOKEN: ${{ secrets.NIGHTLY_PAT }}
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/kernel_workspace/apks"
-
-          MV=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/kernel_workspace/manager_version_${ROOT_TYPE}.txt")
-          MV_CLEAN="${MV#v}"
-          MV_CLEAN="${MV_CLEAN#V}"
-          echo "Manager 版本: ${MV_CLEAN} (root=${ROOT_TYPE})"
-
-          if [ "$ROOT_TYPE" = "bakasu" ]; then
-            REPO="EnderUnion/BakaSU_CI"
-            PATTERN='-arm64-v8a-release\.apk$'
-            EXCLUDE=''
-          else
-            REPO="EnderUnion/KernelSU_Next_CI"
-            PATTERN='-release\.apk$'
-            EXCLUDE='-spoofed_.*-release\.apk$'
-          fi
-
-          echo "获取 ${REPO} releases 列表..."
-          RELEASES_JSON=$(gh api --paginate --slurp "/repos/${REPO}/releases" | jq -c 'add // []')
-          echo "release 数量: $(echo "$RELEASES_JSON" | jq 'length')"
-
-          if [ -n "$EXCLUDE" ]; then
-            ASSET_JSON=$(echo "$RELEASES_JSON" | jq -c --arg mv "$MV_CLEAN" --arg pat "$PATTERN" --arg exc "$EXCLUDE" '
-              [.[] | . as $rel | .assets[]?
-                | select(.name | test($pat; "i"))
-                | select(.name | test($exc; "i") | not)
-                | select((.name | contains($mv)) or ($rel.tag_name | contains($mv)) or (($rel.name // "") | contains($mv)))
-                | {name: .name, url: .browser_download_url}] | first // empty')
-          else
-            ASSET_JSON=$(echo "$RELEASES_JSON" | jq -c --arg mv "$MV_CLEAN" --arg pat "$PATTERN" '
-              [.[] | . as $rel | .assets[]?
-                | select(.name | test($pat; "i"))
-                | select((.name | contains($mv)) or ($rel.tag_name | contains($mv)) or (($rel.name // "") | contains($mv)))
-                | {name: .name, url: .browser_download_url}] | first // empty')
-          fi
-
-          DOWNLOAD_URL=$(echo "$ASSET_JSON" | jq -r '.url // empty')
-          ASSET_NAME=$(echo "$ASSET_JSON" | jq -r '.name // empty')
-
-          if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-            echo "⚠️ 未找到匹配 ${MV_CLEAN} 的 manager APK，跳过（不影响构建）"
-            exit 0
-          fi
-
-          echo "下载 ${ASSET_NAME}"
-          curl -fL --retry 3 --retry-delay 5 \
-            -o "$GITHUB_WORKSPACE/kernel_workspace/apks/${ASSET_NAME}" \
-            "$DOWNLOAD_URL"
-          ls -lh "$GITHUB_WORKSPACE/kernel_workspace/apks/${ASSET_NAME}"
-
-      # ================================================================
       # Generate Telegram caption（含 workflow / release 链接）
       # ================================================================
       - name: Generate Telegram caption
@@ -943,6 +883,9 @@ jobs:
             if [ "$ENABLE_LXC_DOCKER" = "true" ]; then echo "✅ LXC/Docker"; else echo "❌ LXC/Docker"; fi
             if [ "$ENABLE_KVM" = "true" ]; then echo "✅ KVM"; else echo "❌ KVM"; fi
             echo ""
+            echo "📥 Note:"
+            echo "boot.img and the matching manager APK are not attached here. Please download them from the GitHub Release."
+            echo ""
             echo "⚠️ Warning:"
             echo "SUSFS only applies to the BakaSU branch; RKSU/KernelSU-Next will automatically ignore this item."
             echo "LXC/Docker & KVM have been marked as Deprecated. Please build them yourself if needed."
@@ -958,10 +901,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # ================================================================
-      # Upload to Telegram（一条消息 + 一个 caption + 多个文件 = album）
+      # Upload to Telegram（仅 AK3 zip，单文件走 sendDocument）
       # ================================================================
       - name: Upload to Telegram
         if: ${{ inputs.tg }}
+        continue-on-error: true
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -974,10 +918,6 @@ jobs:
 
           pip3 install --quiet requests
 
-          # ---------- 收集三个文件，缺失/超限的跳过 ----------
-          FILES=()
-
-          # 1. AK3 zip（必需）
           AK3=$(ls "$WS/"AK3-*.zip 2>/dev/null | head -n1)
           if [ -z "$AK3" ] || [ ! -f "$AK3" ]; then
             echo "❌ 找不到 AK3 zip"
@@ -985,45 +925,14 @@ jobs:
             exit 1
           fi
           AK3_SIZE=$(stat -c%s "$AK3")
+          echo "AK3: $AK3 ($((AK3_SIZE / 1024 / 1024)) MB)"
           if [ "$AK3_SIZE" -gt "$LIMIT" ]; then
-            echo "❌ AK3 zip 超过 50MB（$((AK3_SIZE / 1024 / 1024)) MB），Bot API 无法上传"
+            echo "❌ AK3 zip 超过 50MB，Bot API 无法上传"
             exit 1
           fi
-          FILES+=("$AK3")
-          echo "AK3: $AK3 ($((AK3_SIZE / 1024 / 1024)) MB)"
 
-          # 2. boot img（可选）
-          BOOT=$(ls "$WS/"boot-*.img 2>/dev/null | head -n1)
-          if [ -n "$BOOT" ] && [ -f "$BOOT" ]; then
-            BOOT_SIZE=$(stat -c%s "$BOOT")
-            if [ "$BOOT_SIZE" -gt "$LIMIT" ]; then
-              echo "⚠️ boot img 超过 50MB，跳过"
-            else
-              FILES+=("$BOOT")
-              echo "boot: $BOOT ($((BOOT_SIZE / 1024 / 1024)) MB)"
-            fi
-          else
-            echo "⚠️ 找不到 boot img，跳过"
-          fi
-
-          # 3. manager APK（可选）
-          APK=$(ls "$WS/apks/"*.apk 2>/dev/null | head -n1)
-          if [ -n "$APK" ] && [ -f "$APK" ]; then
-            APK_SIZE=$(stat -c%s "$APK")
-            if [ "$APK_SIZE" -gt "$LIMIT" ]; then
-              echo "⚠️ manager APK 超过 50MB，跳过"
-            else
-              FILES+=("$APK")
-              echo "manager: $APK ($((APK_SIZE / 1024 / 1024)) MB)"
-            fi
-          else
-            echo "⚠️ 找不到 manager APK（RKSU 或下载失败），跳过"
-          fi
-
-          # ---------- 一次调用 ----------
-          echo "------------ 上传 ${#FILES[@]} 个文件（album）------------"
-          for f in "${FILES[@]}"; do echo "  - $f"; done
-          python3 "$BOT" --caption "$CAPTION" "${FILES[@]}"
+          echo "------------ 上传 AK3 ------------"
+          python3 "$BOT" --caption "$CAPTION" "$AK3"
 
   # ================================
   # 3. 摘要与发布
