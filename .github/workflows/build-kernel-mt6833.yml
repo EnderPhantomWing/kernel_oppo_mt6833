@@ -818,11 +818,14 @@ jobs:
           cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           rm -rf AnyKernel3/.git* AnyKernel3/README.md
 
+          MV=$(tr -d '[:space:]' < "manager_version_${ROOT_TYPE}.txt")
+          echo "Manager version: $MV"
+
           ZIP_NAME="AK3-${MV}-${ARTIFACT_NAME}.zip"
           (cd AnyKernel3 && zip -r9 "../${ZIP_NAME}" .)
 
-          cp android-kernel/out/arch/arm64/boot/Image.gz "Image-${ARTIFACT_NAME}.gz"
-          ls -lh "${ZIP_NAME}" "Image-${ARTIFACT_NAME}.gz"
+          cp android-kernel/out/arch/arm64/boot/Image.gz "Image-${MV}-${ARTIFACT_NAME}.gz"
+          ls -lh "${ZIP_NAME}" "Image-${MV}-${ARTIFACT_NAME}.gz"
 
       - name: 使用 magiskboot 重建 boot 镜像
         run: |
@@ -850,7 +853,7 @@ jobs:
           ls -la
 
           echo "===== 替换 kernel ====="
-          gunzip -c "../Image-${ARTIFACT_NAME}.gz" > kernel
+          gunzip -c "../Image-${MV}-${ARTIFACT_NAME}.gz" > kernel
           ls -lh kernel
 
           echo "===== magiskboot repack ====="
@@ -868,14 +871,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ak3-${{ matrix.root }}
-          path: kernel_workspace/AK3-${{ matrix.artifact }}.zip
+          path: kernel_workspace/AK3-*.zip
           if-no-files-found: error
 
       - name: 上传内核镜像
         uses: actions/upload-artifact@v4
         with:
           name: image-${{ matrix.root }}
-          path: kernel_workspace/Image-${{ matrix.artifact }}.gz
+          path: kernel_workspace/Image-*.gz
           if-no-files-found: error
 
       - name: 上传重建的 boot 镜像
