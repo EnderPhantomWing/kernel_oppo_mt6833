@@ -548,18 +548,24 @@ CONFIG_CRC8=y
 
 # --- Tethering / Hotspot (netd iptables) ---
 #
-# 陷阱：CONFIG_NETFILTER_ADVANCED=y 会把所有未显式列出的 netfilter 选项
-# 从 Kconfig 的 "default m" 变成 "default n"。所以 netd 开热点时要用到的
-# 每一项都必须在这里显式写出，并且内置为 =y（=m 时若 vendor 分区没有对应
-# .ko，功能同样等于不存在）。
+# 与 ColorOS 基线保持一致的 IPv4 NAT 链路。注意下面两点，都是踩过的坑：
 #
-# netd 在 TetherController 里按顺序下发下面这些规则，任何一条返回非 0 都会
-# 让 startTethering() 失败 —— 表现就是「WiFi 能上网，但热点开关打不开 /
-# 一闪就自动关闭」：
-#   filter : tetherctrl_FORWARD ...
-#   nat    : -t nat -A tetherctrl_nat_POSTROUTING -o <up> -j MASQUERADE   (v4 + v6)
-#   mangle : -p tcp --tcp-flags SYN SYN -j TCPMSS --clamp-mss-to-pmtu
-#   raw    : -t raw -A PREROUTING -m rpfilter --invert ! -s fe80::/64 -j DROP
+# 1) 不要开 CONFIG_IP6_NF_NAT / CONFIG_NF_NAT_IPV6。
+#    Android 12 的 netd 在 TetherController 里只对 IPv4 做 MASQUERADE
+#    （nat 表只有 v4 命令），IPv6 侧只用 filter/raw 两张表，靠 RA 下发 MTU，
+#    完全不需要 IPv6 NAT。而 OPPO/realme 的 VINTF 设备兼容性矩阵
+#    (/system/etc/vintf/compatibility_matrix*.xml) 明确要求
+#    CONFIG_IP6_NF_NAT 为关闭状态，一旦开成 =y，开机时 libvintf 会读取
+#    /proc/config.gz 比对失败，弹出「设备内部出现问题」的提示。
+#
+# 2) CONFIG_NETFILTER_ADVANCED=y 会把未显式列出的 netfilter 选项从
+#    "default m" 变成 "default n"，所以 netd 真正需要的项必须显式写出。
+#    netd 实际下发、任何一条失败都会让 startTethering() 直接失败：
+#      mangle : -p tcp --tcp-flags SYN SYN -j TCPMSS --clamp-mss-to-pmtu  (v4)
+#      nat    : -t nat -A tetherctrl_nat_POSTROUTING -o <up> -j MASQUERADE (v4)
+#      filter : tetherctrl_FORWARD + -m state --state ESTABLISHED,RELATED
+#      raw    : -j CT --helper ftp / --helper pptp                        (v4)
+#      raw    : -m rpfilter --invert ! -s fe80::/64 -j DROP               (v6)
 CONFIG_NETFILTER=y
 CONFIG_NETFILTER_ADVANCED=y
 CONFIG_NETFILTER_XTABLES=y
@@ -570,29 +576,28 @@ CONFIG_NF_DEFRAG_IPV4=y
 CONFIG_NF_DEFRAG_IPV6=y
 CONFIG_NF_NAT=y
 CONFIG_NF_NAT_IPV4=y
-CONFIG_NF_NAT_IPV6=y
 CONFIG_NF_NAT_MASQUERADE_IPV4=y
-CONFIG_NF_NAT_MASQUERADE_IPV6=y
+# CONFIG_NF_NAT_IPV6 is not set
+# CONFIG_NF_NAT_MASQUERADE_IPV6 is not set
 
-# IPv4: filter / nat / mangle / raw table
+# IPv4: filter / nat tables
 CONFIG_IP_NF_IPTABLES=y
 CONFIG_IP_NF_FILTER=y
 CONFIG_IP_NF_NAT=y
 CONFIG_IP_NF_TARGET_MASQUERADE=y
 CONFIG_IP_NF_MANGLE=y
 CONFIG_IP_NF_RAW=y
-CONFIG_IP_NF_MATCH_RPFILTER=y
 CONFIG_IP_NF_TARGET_REJECT=y
 
-# IPv6: netd 会无条件下发 ip6tables nat MASQUERADE，缺失即整个热点启动失败
+# IPv6: 只需要 filter / raw（rpfilter 规则落在 raw PREROUTING）
 CONFIG_IP6_NF_IPTABLES=y
 CONFIG_IP6_NF_FILTER=y
-CONFIG_IP6_NF_NAT=y
-CONFIG_IP6_NF_TARGET_MASQUERADE=y
 CONFIG_IP6_NF_MANGLE=y
 CONFIG_IP6_NF_RAW=y
 CONFIG_IP6_NF_MATCH_RPFILTER=y
 CONFIG_IP6_NF_TARGET_REJECT=y
+# CONFIG_IP6_NF_NAT is not set
+# CONFIG_IP6_NF_TARGET_MASQUERADE is not set
 
 # xtables 扩展：TCPMSS / conntrack / owner / socket / quota2 / idletimer
 CONFIG_NETFILTER_XT_NAT=y
@@ -609,7 +614,6 @@ CONFIG_NETFILTER_XT_MATCH_SOCKET=y
 CONFIG_NETFILTER_XT_MATCH_MARK=y
 CONFIG_NETFILTER_XT_MATCH_QUOTA2=y
 CONFIG_NETFILTER_XT_MATCH_COMMENT=y
-CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y
 CONFIG_NETFILTER_XT_MATCH_LIMIT=y
 
 # 策略路由 / 桥接
