@@ -818,7 +818,7 @@ jobs:
           cp android-kernel/out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           rm -rf AnyKernel3/.git* AnyKernel3/README.md
 
-          ZIP_NAME="AK3-${ARTIFACT_NAME}.zip"
+          ZIP_NAME="AK3-${MV}-${ARTIFACT_NAME}.zip"
           (cd AnyKernel3 && zip -r9 "../${ZIP_NAME}" .)
 
           cp android-kernel/out/arch/arm64/boot/Image.gz "Image-${ARTIFACT_NAME}.gz"
