@@ -55,16 +55,16 @@ on:
         required: false
         default: false
         type: boolean
-      branch:
-        description: '选择要克隆的分支(默认 main/4.14.186 主分支)'
-        required: true
-        default: 'main/4.14.186'
-        type: string
       tg:
         description: '上传构建产物到 Telegram 频道'
         required: false
         default: false
         type: boolean
+      branch:
+        description: '选择要克隆的分支(默认 main/4.14.186 主分支)'
+        required: true
+        default: 'main/4.14.186'
+        type: string
 
 jobs:
   # ================================
@@ -958,7 +958,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # ================================================================
-      # Upload to Telegram（合并为一个 step，按 AK3 → boot → manager 顺序发）
+      # Upload to Telegram（一条消息 + 一个 caption + 多个文件 = album）
       # ================================================================
       - name: Upload to Telegram
         if: ${{ inputs.tg }}
@@ -966,65 +966,64 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           CAPTION: ${{ steps.gen_caption.outputs.caption }}
-          ROOT_TYPE: ${{ matrix.root }}
         run: |
           set -e
           WS="$GITHUB_WORKSPACE/kernel_workspace"
-
-          case "$ROOT_TYPE" in
-            bakasu)        ROOT_DISPLAY="BakaSU" ;;
-            kernelsu_next) ROOT_DISPLAY="KernelSU-Next" ;;
-            *)             ROOT_DISPLAY="RKSU" ;;
-          esac
+          BOT="$GITHUB_WORKSPACE/.github/bot.py"
+          LIMIT=$((50 * 1024 * 1024))
 
           pip3 install --quiet requests
 
-          # ---------- 1. AK3 zip（完整 caption，缺失即失败） ----------
+          # ---------- 收集三个文件，缺失/超限的跳过 ----------
+          FILES=()
+
+          # 1. AK3 zip（必需）
           AK3=$(ls "$WS/"AK3-*.zip 2>/dev/null | head -n1)
           if [ -z "$AK3" ] || [ ! -f "$AK3" ]; then
             echo "❌ 找不到 AK3 zip"
             ls -la "$WS" || true
             exit 1
           fi
-          SIZE=$(stat -c%s "$AK3")
-          echo "AK3: $AK3 ($((SIZE / 1024 / 1024)) MB)"
-          if [ "$SIZE" -gt $((50 * 1024 * 1024)) ]; then
-            echo "❌ AK3 zip 超过 50MB，Bot API 无法上传"
+          AK3_SIZE=$(stat -c%s "$AK3")
+          if [ "$AK3_SIZE" -gt "$LIMIT" ]; then
+            echo "❌ AK3 zip 超过 50MB（$((AK3_SIZE / 1024 / 1024)) MB），Bot API 无法上传"
             exit 1
           fi
-          python3 "$GITHUB_WORKSPACE/.github/bot.py" --caption "$CAPTION" "$AK3"
+          FILES+=("$AK3")
+          echo "AK3: $AK3 ($((AK3_SIZE / 1024 / 1024)) MB)"
 
-          # ---------- 2. boot img（短 caption，缺失/超限跳过） ----------
+          # 2. boot img（可选）
           BOOT=$(ls "$WS/"boot-*.img 2>/dev/null | head -n1)
-          if [ -z "$BOOT" ] || [ ! -f "$BOOT" ]; then
-            echo "⚠️ 找不到 boot img，跳过"
-          else
-            SIZE=$(stat -c%s "$BOOT")
-            echo "boot: $BOOT ($((SIZE / 1024 / 1024)) MB)"
-            if [ "$SIZE" -gt $((50 * 1024 * 1024)) ]; then
+          if [ -n "$BOOT" ] && [ -f "$BOOT" ]; then
+            BOOT_SIZE=$(stat -c%s "$BOOT")
+            if [ "$BOOT_SIZE" -gt "$LIMIT" ]; then
               echo "⚠️ boot img 超过 50MB，跳过"
             else
-              python3 "$GITHUB_WORKSPACE/.github/bot.py" \
-                --caption "📱 Boot Image | ${ROOT_DISPLAY} | $(basename "$BOOT")" \
-                "$BOOT"
+              FILES+=("$BOOT")
+              echo "boot: $BOOT ($((BOOT_SIZE / 1024 / 1024)) MB)"
             fi
+          else
+            echo "⚠️ 找不到 boot img，跳过"
           fi
 
-          # ---------- 3. manager APK（短 caption，缺失/超限跳过） ----------
+          # 3. manager APK（可选）
           APK=$(ls "$WS/apks/"*.apk 2>/dev/null | head -n1)
-          if [ -z "$APK" ] || [ ! -f "$APK" ]; then
-            echo "⚠️ 找不到 manager APK（RKSU 或下载失败），跳过"
-          else
-            SIZE=$(stat -c%s "$APK")
-            echo "manager: $APK ($((SIZE / 1024 / 1024)) MB)"
-            if [ "$SIZE" -gt $((50 * 1024 * 1024)) ]; then
+          if [ -n "$APK" ] && [ -f "$APK" ]; then
+            APK_SIZE=$(stat -c%s "$APK")
+            if [ "$APK_SIZE" -gt "$LIMIT" ]; then
               echo "⚠️ manager APK 超过 50MB，跳过"
             else
-              python3 "$GITHUB_WORKSPACE/.github/bot.py" \
-                --caption "🛠️ Manager APK | ${ROOT_DISPLAY} | $(basename "$APK")" \
-                "$APK"
+              FILES+=("$APK")
+              echo "manager: $APK ($((APK_SIZE / 1024 / 1024)) MB)"
             fi
+          else
+            echo "⚠️ 找不到 manager APK（RKSU 或下载失败），跳过"
           fi
+
+          # ---------- 一次调用 ----------
+          echo "------------ 上传 ${#FILES[@]} 个文件（album）------------"
+          for f in "${FILES[@]}"; do echo "  - $f"; done
+          python3 "$BOT" --caption "$CAPTION" "${FILES[@]}"
 
   # ================================
   # 3. 摘要与发布

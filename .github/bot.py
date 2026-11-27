@@ -1,11 +1,13 @@
 import os
 import sys
+import json
 import requests
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
-MAX_SIZE = 50 * 1024 * 1024
-MAX_CAPTION = 1024
+MAX_SIZE = 50 * 1024 * 1024   # Bot API 单文件上限
+MAX_CAPTION = 1024            # Telegram caption 上限
+MAX_ALBUM = 10                # Telegram 单个 album 上限
 
 
 def truncate_caption(caption):
@@ -17,24 +19,23 @@ def truncate_caption(caption):
     return caption
 
 
-def send_file(path, caption=None):
-    if not os.path.isfile(path):
-        raise SystemExit(f"[-] File not found: {path}")
-    size = os.path.getsize(path)
-    if size > MAX_SIZE:
-        raise SystemExit(
-            f"[-] {path} is {size / 1024**2:.1f}MB, exceeds Bot API 50MB limit. "
-            f"Split the zip or switch back to Telethon/MTProto."
-        )
+def check_files(files):
+    if not files:
+        raise SystemExit("[-] No file paths provided.")
+    if len(files) > MAX_ALBUM:
+        raise SystemExit(f"[-] Too many files ({len(files)}), Telegram album max is {MAX_ALBUM}.")
+    for path in files:
+        if not os.path.isfile(path):
+            raise SystemExit(f"[-] File not found: {path}")
+        size = os.path.getsize(path)
+        if size > MAX_SIZE:
+            raise SystemExit(
+                f"[-] {path} is {size / 1024**2:.1f}MB, exceeds Bot API 50MB limit. "
+                f"Split the zip or switch back to Telethon/MTProto."
+            )
 
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
-    data = {"chat_id": CHAT_ID, "parse_mode": "HTML"}
-    if caption:
-        data["caption"] = caption
 
-    with open(path, "rb") as f:
-        resp = requests.post(url, data=data, files={"document": f}, timeout=300)
-
+def handle_response(resp):
     try:
         body = resp.json()
     except ValueError:
@@ -50,7 +51,52 @@ def send_file(path, caption=None):
             raise SystemExit(f"[-] Caption too long. ({desc})")
         raise SystemExit(f"[-] Telegram API error: {desc}")
 
-    print(f"[+] Sent {path} ({size / 1024**2:.1f}MB)")
+
+def send_single(path, caption=None):
+    """单文件：sendDocument"""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
+    data = {"chat_id": CHAT_ID, "parse_mode": "HTML"}
+    if caption:
+        data["caption"] = caption
+
+    with open(path, "rb") as f:
+        resp = requests.post(url, data=data, files={"document": f}, timeout=300)
+
+    handle_response(resp)
+    size = os.path.getsize(path)
+    print(f"[+] Sent single: {path} ({size / 1024**2:.1f}MB)")
+
+
+def send_album(files, caption=None):
+    """多文件：sendMediaGroup，caption 挂在第一个文件上，其余不带"""
+    media = []
+    files_payload = {}
+    handles = []
+
+    try:
+        for i, path in enumerate(files):
+            item = {"type": "document", "media": f"attach://file{i}"}
+            if i == 0 and caption:
+                item["caption"] = caption
+                item["parse_mode"] = "HTML"
+            media.append(item)
+
+            fh = open(path, "rb")
+            handles.append(fh)
+            files_payload[f"file{i}"] = (os.path.basename(path), fh)
+
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMediaGroup"
+        data = {"chat_id": CHAT_ID, "media": json.dumps(media)}
+        resp = requests.post(url, data=data, files=files_payload, timeout=600)
+    finally:
+        for fh in handles:
+            fh.close()
+
+    handle_response(resp)
+    total = sum(os.path.getsize(p) for p in files)
+    print(f"[+] Sent album: {len(files)} file(s), total {total / 1024**2:.1f}MB")
+    for p in files:
+        print(f"    - {p} ({os.path.getsize(p) / 1024**2:.1f}MB)")
 
 
 def main():
@@ -63,12 +109,13 @@ def main():
         caption = args[i + 1]
         args = args[:i] + args[i + 2:]
 
-    if not args:
-        raise SystemExit("[-] No file paths provided.")
-
+    check_files(args)
     caption = truncate_caption(caption)
-    for idx, path in enumerate(args):
-        send_file(path, caption if idx == 0 else None)
+
+    if len(args) == 1:
+        send_single(args[0], caption)
+    else:
+        send_album(args, caption)
 
 
 if __name__ == "__main__":
