@@ -3,11 +3,11 @@ name: Build Kernel for PFGM00-MT6833
 on:
   workflow_dispatch:
     inputs:
-      enable_all_roots:
-        description: '构建所有 Root 管理器（矩阵构建）'
-        required: false
-        default: false
-        type: boolean
+      # enable_all_roots:
+      #   description: '构建所有 Root 管理器（矩阵构建）'
+      #   required: false
+      #   default: false
+      #   type: boolean
       enable_kernelsu:
         description: '启用 KernelSU 支持'
         required: false
@@ -55,6 +55,11 @@ on:
         required: false
         default: false
         type: boolean
+      tg:
+        description: '上传构建产物到 Telegram 频道'
+        required: false
+        default: false
+        type: boolean
       branch:
         description: '选择要克隆的分支(默认 main/4.14.186 主分支)'
         required: true
@@ -73,7 +78,6 @@ jobs:
       tag: ${{ steps.setup.outputs.tag }}
       feature_suffix: ${{ steps.setup.outputs.feature_suffix }}
       tag_features: ${{ steps.setup.outputs.tag_features }}
-      # ---- Root 配置（来自「输出 Root 配置」step）----
       root_config: ${{ steps.root_config.outputs.root_config }}
       root_count: ${{ steps.root_config.outputs.root_count }}
       root_list: ${{ steps.root_config.outputs.root_list }}
@@ -88,11 +92,8 @@ jobs:
           ENABLE_KERNELSU: ${{ inputs.enable_kernelsu }}
           ENABLE_KERNELSU_NEXT: ${{ inputs.enable_kernelsu_next }}
           ENABLE_BAKASU: ${{ inputs.enable_bakasu }}
-
-          # Deprecated
           ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
           ENABLE_KVM: ${{ inputs.enable_kvm }}
-
           ENABLE_BBR: ${{ inputs.enable_bbr }}
           ENABLE_DROIDSPACE: ${{ inputs.enable_droidspace }}
           ENABLE_SUSFS: ${{ inputs.enable_susfs }}
@@ -101,7 +102,6 @@ jobs:
         run: |
           set -e
 
-          # ========= 1. 收集 root 列表 =========
           ROOTS="[]"
           if [ "$ENABLE_ALL_ROOTS" = "true" ]; then
             ROOTS='["kernelsu","bakasu","kernelsu_next"]'
@@ -128,7 +128,6 @@ jobs:
             exit 0
           fi
 
-          # ========= 2. SUSFS 生效判断（仅 bakasu 支持） =========
           SUSFS_EFFECTIVE="false"
           if [ "$ENABLE_SUSFS" = "true" ] && echo "$ROOTS" | jq -e 'index("bakasu") != null' > /dev/null; then
             SUSFS_EFFECTIVE="true"
@@ -136,7 +135,6 @@ jobs:
             echo "⚠️ 勾选了 SUSFS，但未选择 bakasu；SUSFS 仅 BakaSU 支持，将被忽略"
           fi
 
-          # ========= 3. artifact 公共后缀（不含 SUSFS） =========
           FUNC_SUFFIX=""
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-Docker"; fi
           if [ "$ENABLE_KVM" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-KVM"; fi
@@ -144,7 +142,6 @@ jobs:
           if [ "$ENABLE_DROIDSPACE" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-DroidSpace"; fi
           if [ "$ENABLE_NOMOUNT" = "true" ]; then FUNC_SUFFIX="${FUNC_SUFFIX}-NoMount"; fi
 
-          # ========= 4. 生成 matrix（SUSFS 仅挂 bakasu） =========
           MATRIX=$(for root in $(echo "$ROOTS" | jq -r '.[]'); do
             case "$root" in
               bakasu)        NAME="PFGM00-MT6833-BakaSU" ;;
@@ -160,29 +157,13 @@ jobs:
               '{root:$root, artifact:$artifact, susfs:$susfs}'
           done | jq -s -c .)
 
-          # ========= 5. 计算 base =========
-          if [ "$COUNT" -gt 1 ]; then
-            BASE="all"
-          else
-            ROOT_ONLY=$(echo "$ROOTS" | jq -r '.[0]')
-            case "$ROOT_ONLY" in
-              bakasu)        BASE="bakasu" ;;
-              kernelsu_next) BASE="kernelsu-next" ;;
-              *)             BASE="rksu" ;;
-            esac
-          fi
+          TAG="r${RUN_NUMBER}"
 
-          # ========= 6. 计算 tag features（小写，不含 Deprecated） =========
           TAG_FEATURES=""
           if [ "$ENABLE_BBR" = "true" ]; then TAG_FEATURES="${TAG_FEATURES}-bbr"; fi
           if [ "$ENABLE_DROIDSPACE" = "true" ]; then TAG_FEATURES="${TAG_FEATURES}-droidspace"; fi
           if [ "$ENABLE_NOMOUNT" = "true" ]; then TAG_FEATURES="${TAG_FEATURES}-nomount"; fi
           if [ "$SUSFS_EFFECTIVE" = "true" ]; then TAG_FEATURES="${TAG_FEATURES}-susfs"; fi
-
-          # ========= 7. 生成 Release Tag =========
-          # 格式：PFGM00-<date>-r<run>-<base>[-<features>]
-          # PFGM00-$(date -u +'%Y%m%d')-r${RUN_NUMBER}-${BASE}${TAG_FEATURES}
-          TAG="r${RUN_NUMBER}"
 
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           echo "total=$COUNT" >> "$GITHUB_OUTPUT"
@@ -194,11 +175,6 @@ jobs:
           echo "Feature Suffix (common): $FUNC_SUFFIX"
           echo "SUSFS effective: $SUSFS_EFFECTIVE"
 
-      # ============================================================
-      # 输出 Root 配置：按 inputs.enable_all_roots / enable_bakasu /
-      # enable_kernelsu_next（以及 enable_kernelsu）生成结构化配置，
-      # 同时写入 $GITHUB_OUTPUT 和 $GITHUB_ENV。
-      # ============================================================
       - name: 输出 Root 配置
         id: root_config
         shell: bash
@@ -210,11 +186,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # ========= 1. 收集启用的 root =========
           ROOTS=()
 
           if [ "${ENABLE_ALL_ROOTS:-false}" = "true" ]; then
-            # all_roots 视为全部启用（与 setup 中一致，含 kernelsu）
             ROOTS=("KernelSU" "BakaSU" "KernelSU-Next")
           else
             [ "${ENABLE_KERNELSU:-false}" = "true" ]      && ROOTS+=("KernelSU")
@@ -224,7 +198,6 @@ jobs:
 
           COUNT=${#ROOTS[@]}
 
-          # ========= 2. 无选择时的兜底 =========
           if [ "$COUNT" -eq 0 ]; then
             echo "root_config=none"            >> "$GITHUB_OUTPUT"
             echo "root_count=0"                >> "$GITHUB_OUTPUT"
@@ -246,14 +219,9 @@ jobs:
             exit 0
           fi
 
-          # ========= 3. 生成输出 =========
-          # 逗号分隔字符串，例如: bakasu,kernelsu_next
           ROOT_CONFIG=$(IFS=,; echo "${ROOTS[*]}")
-
-          # JSON 数组，例如: ["bakasu","kernelsu_next"]
           ROOT_LIST=$(printf '%s\n' "${ROOTS[@]}" | jq -R . | jq -s -c .)
 
-          # 布尔标识（用于后续 if 判断）
           BAKASU_ENABLED=false
           KERNELSU_NEXT_ENABLED=false
           KERNELSU_ENABLED=false
@@ -300,10 +268,8 @@ jobs:
       ARTIFACT_NAME: ${{ matrix.artifact }}
       FEATURE_SUFFIX: ${{ needs.setup.outputs.feature_suffix }}
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
-      # Deprecated
       ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
       ENABLE_KVM: ${{ inputs.enable_kvm }}
-
       ENABLE_BBR: ${{ inputs.enable_bbr }}
       ENABLE_DROIDSPACE: ${{ inputs.enable_droidspace }}
       ENABLE_SUSFS: ${{ inputs.enable_susfs }}
@@ -348,8 +314,6 @@ jobs:
           git clone -q --depth=1 -b 10.0 \
             https://github.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-6443078 \
             clang-aosp
-          # 可选：固定 commit 提高可复现性（示例，按需替换 <commit>）
-          # (cd clang-aosp && git fetch --depth=1 origin <commit> && git checkout FETCH_HEAD)
 
       - name: 验证工具链
         run: |
@@ -496,7 +460,6 @@ jobs:
             done
           fi
 
-      # ========== Deprecated ==========
       - name: LXC/Docker 支持
         if: env.ENABLE_LXC_DOCKER == 'true'
         run: |
@@ -527,7 +490,6 @@ jobs:
 
           sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' android-kernel/arch/arm64/configs/PFGM00_defconfig
           echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> android-kernel/arch/arm64/configs/PFGM00_defconfig
-      # ================================
 
       - name: 配置 defconfig
         run: |
@@ -542,18 +504,6 @@ jobs:
           clang  --version | head -n1
           ld.lld --version | head -n1
 
-          # ==================================================================
-          # 参考 workflow 方案：配置阶段只传 CC/HOSTCC/HOSTCXX/LD，
-          # 不传 CROSS_COMPILE / CLANG_TRIPLE。
-          #
-          # 原因：4.14 顶层 Makefile 中 CC = $(CROSS_COMPILE)gcc。
-          # 若不传 CC 且不传 CROSS_COMPILE，则 CC 展开为 "gcc"，
-          # 交给 shell 后由 $PATH 找到系统 /usr/bin/gcc，探测成功。
-          # 若传了 CROSS_COMPILE=aarch64-linux-android-，则 CC 展开为
-          # "aarch64-linux-android-gcc"，而 gcc64/bin 中通常只有 binutils
-          # （ld/objcopy/ar 等），没有 gcc 本体，子 make 探测时报
-          # "aarch64-linux-android-gcc: No such file or directory"。
-          # ==================================================================
           CONFIG_ARGS=(
             "CC=ccache clang"
             "HOSTCC=clang"
@@ -561,7 +511,6 @@ jobs:
             "LD=ld.lld"
           )
 
-          # ========== Deprecated: KVM ==========
           if [ "$ENABLE_KVM" = "true" ]; then
             cat >> arch/arm64/configs/PFGM00_defconfig <<'EOF'
           CONFIG_VIRTUALIZATION=y
@@ -570,13 +519,11 @@ jobs:
           CONFIG_VHOST_CROSS_ENDIAN_LEGACY=y
           EOF
           fi
-          # ================================
 
           make -j$(nproc --all) O=out ARCH=arm64 \
             "${CONFIG_ARGS[@]}" \
             PFGM00_defconfig
 
-          # BBR
           if [ "$ENABLE_BBR" = "true" ]; then
             echo "启用 BBR..."
             ./scripts/config --file out/.config \
@@ -584,7 +531,6 @@ jobs:
               --enable CONFIG_NET_SCH_FQ
           fi
 
-          # DroidSpace
           if [ "$ENABLE_DROIDSPACE" = "true" ]; then
             echo "启用 DroidSpace..."
             ./scripts/config --file out/.config \
@@ -663,16 +609,12 @@ jobs:
               --disable CONFIG_ANDROID_PARANOID_NETWORK
           fi
 
-          # ========== Deprecated: LXC/Docker ==========
           if [ "$ENABLE_LXC_DOCKER" = "true" ]; then
             echo "KCFLAGS_EXTRA=-Wno-error=sizeof-array-div" >> "$GITHUB_ENV"
           else
-            # 不写空值，构建阶段使用 ${KCFLAGS_EXTRA:-}
             echo "KCFLAGS_EXTRA_DISABLED=1" >> "$GITHUB_ENV"
           fi
-          # ================================
 
-          # ========= SU Hook Method（SUSFS 仅 bakasu 生效） =========
           EFFECTIVE_SUSFS="false"
           if [ "$ENABLE_SUSFS" = "true" ] && [ "$ROOT_TYPE" = "bakasu" ]; then
             EFFECTIVE_SUSFS="true"
@@ -698,7 +640,6 @@ jobs:
               --disable CONFIG_KSU_TRACEPOINT_HOOK
           fi
 
-          # NoMount VFS
           if [ "$ENABLE_NOMOUNT" = "true" ]; then
             echo "KSU_LOG: 启用 NoMount VFS 挂载"
             ./scripts/config --file out/.config \
@@ -709,7 +650,6 @@ jobs:
               --disable CONFIG_NOMOUNT
           fi
 
-          # DroidSpace 需要 USER_NS (docker unsafe procfs 修复)，仅在启用时保留
           if [ "$ENABLE_DROIDSPACE" = "true" ]; then
             ./scripts/config --file out/.config \
               --enable CONFIG_NAMESPACES \
@@ -726,12 +666,10 @@ jobs:
               --enable CONFIG_SECTION_MISMATCH_WARN_ONLY
           fi
 
-          # olddefconfig：沿用 CONFIG_ARGS，仍不传 CROSS_COMPILE
           make O=out ARCH=arm64 \
             "${CONFIG_ARGS[@]}" \
             olddefconfig
 
-          # 配置校验
           echo "===== KSU/SUSFS 配置校验 ====="
           grep -E 'CONFIG_KSU|CONFIG_KSU_MANUAL_HOOK|CONFIG_KSU_SUSFS|CONFIG_KSU_TRACEPOINT_HOOK|CONFIG_KSU_SUSFS_SUS_SU' out/.config || true
 
@@ -770,8 +708,6 @@ jobs:
           export KBUILD_BUILD_HOST=Github@EnderPhantomWing
           export KBUILD_BUILD_USER=EnderPhantomWing
 
-          # LOCALVERSION：-g<commit>-r<run>-<BUILD_TIME>
-          # BUILD_TIME 格式：yyyyMMddTHHMMSSZ（UTC，例如 20241027T123456Z）
           BUILD_TIME=$(date -u +%Y%m%dT%H%M%SZ)
           COMMIT_SHORT=${GITHUB_SHA:0:10}
           RUN_NUMBER=${{ github.run_number }}
@@ -781,14 +717,6 @@ jobs:
           KCFLAGS_VALUE="${KCFLAGS_EXTRA:-}"
           echo "KCFLAGS=${KCFLAGS_VALUE}"
 
-          # ==================================================================
-          # 参考 workflow 方案：仅在最终编译阶段注入完整交叉工具链参数。
-          #
-          # 此时 CC 被命令行覆盖为 "ccache clang"，Kbuild 的版本探测、
-          # 特性探测全部走 clang，不会 fallback 到 $(CROSS_COMPILE)gcc。
-          # CROSS_COMPILE 仅供 binutils 使用（ld/objcopy/ar 等），
-          # 这些文件在 gcc64/bin / gcc32/bin 中存在。
-          # ==================================================================
           BUILD_ARGS=(
             "CC=ccache clang"
             "HOSTCC=clang"
@@ -860,7 +788,6 @@ jobs:
           ./magiskboot repack boot-ressu-35056.img
           ls -lh new-boot.img
 
-          # boot 包名：boot-<mv>-<artifact>.img（artifact 已含 SUSFS/特性后缀）
           FINAL_NAME="boot-${MV}-${ARTIFACT_NAME}.img"
           echo "Final boot name: ${FINAL_NAME}"
           cp new-boot.img "../${FINAL_NAME}"
@@ -897,8 +824,6 @@ jobs:
             kernel_workspace/manager_version_${{ matrix.root }}.txt
           if-no-files-found: warn
 
-      # 排障用：保留本次构建的完整 .config、热点相关配置清单与 System.map，
-      # 下次「某功能失效」时可以直接 diff，而不用重新反编译内核镜像去抠配置。
       - name: 上传构建配置与内核符号表
         if: always()
         uses: actions/upload-artifact@v4
@@ -909,6 +834,105 @@ jobs:
             kernel_workspace/netfilter-*.txt
             kernel_workspace/android-kernel/out/System.map
           if-no-files-found: warn
+
+      # ================================================================
+      # Generate Telegram caption（含 workflow / release 链接）
+      # ================================================================
+      - name: Generate Telegram caption
+        id: gen_caption
+        if: ${{ inputs.tg }}
+        env:
+          ROOT_TYPE: ${{ matrix.root }}
+          ENABLE_BBR: ${{ inputs.enable_bbr }}
+          ENABLE_DROIDSPACE: ${{ inputs.enable_droidspace }}
+          ENABLE_NOMOUNT: ${{ inputs.enable_nomount }}
+          ENABLE_LXC_DOCKER: ${{ inputs.enable_lxc_docker }}
+          ENABLE_KVM: ${{ inputs.enable_kvm }}
+          SUSFS_EFFECTIVE: ${{ matrix.susfs }}
+        run: |
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_MSG=$(git log -1 --pretty=format:'%s')
+
+          WS="$GITHUB_WORKSPACE/kernel_workspace"
+          MV=$(tr -d '[:space:]' < "$WS/manager_version_${ROOT_TYPE}.txt")
+          KV=$(tr -d '[:space:]' < "$WS/kernel_version_${ROOT_TYPE}.txt")
+
+          case "$ROOT_TYPE" in
+            bakasu)        ROOT_DISPLAY="BakaSU" ;;
+            kernelsu_next) ROOT_DISPLAY="KernelSU-Next" ;;
+            *)             ROOT_DISPLAY="RKSU" ;;
+          esac
+
+          {
+            echo "caption<<EOF"
+            echo "🔧 Commit: ${COMMIT_SHA} - ${COMMIT_MSG}"
+            echo ""
+            echo "Kernel Info:"
+            echo ""
+            echo "OPPO A93s 5G | PFGM00(OP5231) MT6833 Kernel - A12"
+            echo "Kernel Version: ${KV}"
+            echo ""
+            echo "📦 Feature:"
+            echo "Root Solution: ${ROOT_DISPLAY}"
+            echo "Manager Version: ${MV}"
+            if [ "$ENABLE_BBR" = "true" ]; then echo "✅ BBR"; else echo "❌ BBR"; fi
+            if [ "$ENABLE_DROIDSPACE" = "true" ]; then echo "✅ DroidSpace"; else echo "❌ DroidSpace"; fi
+            if [ "$SUSFS_EFFECTIVE" = "true" ]; then echo "✅ SUSFS-v2.4.0"; else echo "❌ SUSFS-v2.4.0"; fi
+            if [ "$ENABLE_NOMOUNT" = "true" ]; then echo "✅ NoMount"; else echo "❌ NoMount"; fi
+            echo "🗑️ Deprecated Features:"
+            if [ "$ENABLE_LXC_DOCKER" = "true" ]; then echo "✅ LXC/Docker"; else echo "❌ LXC/Docker"; fi
+            if [ "$ENABLE_KVM" = "true" ]; then echo "✅ KVM"; else echo "❌ KVM"; fi
+            echo ""
+            echo "📥 Note:"
+            echo "boot.img and the matching manager APK are not attached here. Please download them from the GitHub Release."
+            echo ""
+            echo "⚠️ Warning:"
+            echo "SUSFS only applies to the BakaSU branch; RKSU/KernelSU-Next will automatically ignore this item."
+            echo "LXC/Docker & KVM have been marked as Deprecated. Please build them yourself if needed."
+            echo ""
+            echo "🔗 Links:"
+            echo "Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "Release:  ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.setup.outputs.tag }}"
+            echo ""
+            echo "Rate with stars 🌟 Github if you like it!"
+            echo "Follow👉: @EnderChannelOfficial"
+            echo "Dev: @EnderPhantomWing"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # ================================================================
+      # Upload to Telegram（仅 AK3 zip，单文件走 sendDocument）
+      # ================================================================
+      - name: Upload to Telegram
+        if: ${{ inputs.tg }}
+        continue-on-error: true
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          CAPTION: ${{ steps.gen_caption.outputs.caption }}
+        run: |
+          set -e
+          WS="$GITHUB_WORKSPACE/kernel_workspace"
+          BOT="$GITHUB_WORKSPACE/.github/bot.py"
+          LIMIT=$((50 * 1024 * 1024))
+
+          pip3 install --quiet requests
+
+          AK3=$(ls "$WS/"AK3-*.zip 2>/dev/null | head -n1)
+          if [ -z "$AK3" ] || [ ! -f "$AK3" ]; then
+            echo "❌ 找不到 AK3 zip"
+            ls -la "$WS" || true
+            exit 1
+          fi
+          AK3_SIZE=$(stat -c%s "$AK3")
+          echo "AK3: $AK3 ($((AK3_SIZE / 1024 / 1024)) MB)"
+          if [ "$AK3_SIZE" -gt "$LIMIT" ]; then
+            echo "❌ AK3 zip 超过 50MB，Bot API 无法上传"
+            exit 1
+          fi
+
+          echo "------------ 上传 AK3 ------------"
+          python3 "$BOT" --caption "$CAPTION" "$AK3"
 
   # ================================
   # 3. 摘要与发布
@@ -946,7 +970,7 @@ jobs:
             echo "| **Enable NoMount** | ${{ inputs.enable_nomount }} |"
             echo ""
             echo "> ⚠️ SUSFS only applies to the BakaSU branch; RKSU/KernelSU-Next will automatically ignore this item."
-            echo "> ⚠️ LXC/Docker & KVM have been marked as Deprecated. Please build them yourself if needed. "
+            echo "> ⚠️ LXC/Docker & KVM have been marked as Deprecated. Please build them yourself if needed."
             echo ""
             echo "### Environment Infomation"
             echo ""

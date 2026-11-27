@@ -5893,6 +5893,13 @@ page_owner=on loop.max_part=7";
 };
 
 &i2c6 {
+	/* i2c 总线下的设备用 1 个地址单元、没有 size 单元；
+	 * 否则会继承根节点的 #address-cells=<2>/#size-cells=<1>，
+	 * 导致 speaker_amp@34 的 reg=<0x34> 被 dtc 判为长度非法。
+	 */
+	#address-cells = <1>;
+	#size-cells = <0>;
+
 	speaker_amp: speaker_amp@34 {
 		compatible = "mediatek,speaker_amp";
 		#sound-dai-cells = <0>;
