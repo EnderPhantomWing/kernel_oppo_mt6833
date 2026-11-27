@@ -3735,18 +3735,14 @@ struct wb_domain *mem_cgroup_wb_domain(struct bdi_writeback *wb)
 
 /*
  * idx can be of type enum memcg_stat_item or node_stat_item.
- * Keep in sync with memcg_exact_page().
+ * Keep in sync with memcg_page_state().
+ *
+ * 本树的 memcg 统计已经是 4.15+ 的 per-cpu 布局（memcg->stat->count[]），
+ * 没有旧的 atomic stat[] / stat_cpu。精确值就是各 CPU 计数之和。
  */
 static unsigned long memcg_exact_page_state(struct mem_cgroup *memcg, int idx)
 {
-	long x = atomic_long_read(&memcg->stat[idx]);
-	int cpu;
-
-	for_each_online_cpu(cpu)
-		x += per_cpu_ptr(memcg->stat_cpu, cpu)->count[idx];
-	if (x < 0)
-		x = 0;
-	return x;
+	return memcg_page_state(memcg, idx);
 }
 
 /**
