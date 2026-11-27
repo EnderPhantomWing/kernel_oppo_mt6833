@@ -56,7 +56,7 @@ on:
         default: false
         type: boolean
       branch:
-        description: '选择要克隆的分支（仅限开发者）'
+        description: '选择要克隆的分支(默认 main/4.14.186 主分支)'
         required: true
         default: 'main/4.14.186'
         type: string
@@ -73,6 +73,13 @@ jobs:
       tag: ${{ steps.setup.outputs.tag }}
       feature_suffix: ${{ steps.setup.outputs.feature_suffix }}
       tag_features: ${{ steps.setup.outputs.tag_features }}
+      # ---- Root 配置（来自「输出 Root 配置」step）----
+      root_config: ${{ steps.root_config.outputs.root_config }}
+      root_count: ${{ steps.root_config.outputs.root_count }}
+      root_list: ${{ steps.root_config.outputs.root_list }}
+      bakasu_enabled: ${{ steps.root_config.outputs.enable_bakasu }}
+      kernelsu_next_enabled: ${{ steps.root_config.outputs.enable_kernelsu_next }}
+      kernelsu_enabled: ${{ steps.root_config.outputs.enable_kernelsu }}
     steps:
       - name: 生成矩阵与发布标签
         id: setup
@@ -186,6 +193,96 @@ jobs:
           echo "Tag: $TAG"
           echo "Feature Suffix (common): $FUNC_SUFFIX"
           echo "SUSFS effective: $SUSFS_EFFECTIVE"
+
+      # ============================================================
+      # 输出 Root 配置：按 inputs.enable_all_roots / enable_bakasu /
+      # enable_kernelsu_next（以及 enable_kernelsu）生成结构化配置，
+      # 同时写入 $GITHUB_OUTPUT 和 $GITHUB_ENV。
+      # ============================================================
+      - name: 输出 Root 配置
+        id: root_config
+        shell: bash
+        env:
+          ENABLE_ALL_ROOTS: ${{ inputs.enable_all_roots }}
+          ENABLE_KERNELSU: ${{ inputs.enable_kernelsu }}
+          ENABLE_KERNELSU_NEXT: ${{ inputs.enable_kernelsu_next }}
+          ENABLE_BAKASU: ${{ inputs.enable_bakasu }}
+        run: |
+          set -euo pipefail
+
+          # ========= 1. 收集启用的 root =========
+          ROOTS=()
+
+          if [ "${ENABLE_ALL_ROOTS:-false}" = "true" ]; then
+            # all_roots 视为全部启用（与 setup 中一致，含 kernelsu）
+            ROOTS=("KernelSU" "BakaSU" "KernelSU-Next")
+          else
+            [ "${ENABLE_KERNELSU:-false}" = "true" ]      && ROOTS+=("KernelSU")
+            [ "${ENABLE_BAKASU:-false}" = "true" ]        && ROOTS+=("BakaSU")
+            [ "${ENABLE_KERNELSU_NEXT:-false}" = "true" ] && ROOTS+=("KernelSU-Next")
+          fi
+
+          COUNT=${#ROOTS[@]}
+
+          # ========= 2. 无选择时的兜底 =========
+          if [ "$COUNT" -eq 0 ]; then
+            echo "root_config=none"            >> "$GITHUB_OUTPUT"
+            echo "root_count=0"                >> "$GITHUB_OUTPUT"
+            echo "root_list=[]"                >> "$GITHUB_OUTPUT"
+            echo "enable_bakasu=false"         >> "$GITHUB_OUTPUT"
+            echo "enable_kernelsu_next=false"  >> "$GITHUB_OUTPUT"
+            echo "enable_kernelsu=false"       >> "$GITHUB_OUTPUT"
+
+            {
+              echo "ROOT_CONFIG=none"
+              echo "ROOT_COUNT=0"
+              echo "ROOT_LIST=[]"
+              echo "BAKASU_ENABLED=false"
+              echo "KERNELSU_NEXT_ENABLED=false"
+              echo "KERNELSU_ENABLED=false"
+            } >> "$GITHUB_ENV"
+
+            echo "⚠️ 未选择任何 Root 管理器"
+            exit 0
+          fi
+
+          # ========= 3. 生成输出 =========
+          # 逗号分隔字符串，例如: bakasu,kernelsu_next
+          ROOT_CONFIG=$(IFS=,; echo "${ROOTS[*]}")
+
+          # JSON 数组，例如: ["bakasu","kernelsu_next"]
+          ROOT_LIST=$(printf '%s\n' "${ROOTS[@]}" | jq -R . | jq -s -c .)
+
+          # 布尔标识（用于后续 if 判断）
+          BAKASU_ENABLED=false
+          KERNELSU_NEXT_ENABLED=false
+          KERNELSU_ENABLED=false
+          for r in "${ROOTS[@]}"; do
+            case "$r" in
+              BakaSU)        BAKASU_ENABLED=true ;;
+              KernelSU-Next) KERNELSU_NEXT_ENABLED=true ;;
+              KernelSU)      KERNELSU_ENABLED=true ;;
+            esac
+          done
+
+          echo "root_config=${ROOT_CONFIG}"                    >> "$GITHUB_OUTPUT"
+          echo "root_count=${COUNT}"                           >> "$GITHUB_OUTPUT"
+          echo "root_list=${ROOT_LIST}"                        >> "$GITHUB_OUTPUT"
+          echo "enable_bakasu=${BAKASU_ENABLED}"               >> "$GITHUB_OUTPUT"
+          echo "enable_kernelsu_next=${KERNELSU_NEXT_ENABLED}" >> "$GITHUB_OUTPUT"
+          echo "enable_kernelsu=${KERNELSU_ENABLED}"           >> "$GITHUB_OUTPUT"
+
+          {
+            echo "ROOT_CONFIG=${ROOT_CONFIG}"
+            echo "ROOT_COUNT=${COUNT}"
+            echo "ROOT_LIST=${ROOT_LIST}"
+            echo "BAKASU_ENABLED=${BAKASU_ENABLED}"
+            echo "KERNELSU_NEXT_ENABLED=${KERNELSU_NEXT_ENABLED}"
+            echo "KERNELSU_ENABLED=${KERNELSU_ENABLED}"
+          } >> "$GITHUB_ENV"
+
+          echo "===== Root Config ====="
+          echo "启用 Root: ${ROOT_CONFIG} (共 ${COUNT} 个)"
 
   # ================================
   # 2. 矩阵构建
@@ -306,17 +403,17 @@ jobs:
               kernelsu)
                 echo "KSU_LOG: 下载并应用 RKSU 官方 4.14 补丁"
                 wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
-                patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
+                patch -p1 < ksu-4.14.patch || { echo "⚠️ 补丁应用失败"; exit 1; }
                 ;;
               kernelsu_next)
                 echo "KSU_LOG: 下载并应用 KernelSU Next 官方 4.14 补丁"
                 wget https://github.com/rksuorg/kernel_patches/raw/master/manual_hook/kernel-4.14.patch -O ksu-4.14.patch
-                patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
+                patch -p1 < ksu-4.14.patch || { echo "⚠️ 补丁应用失败"; exit 1; }
                 ;;
               bakasu)
                 echo "KSU_LOG: 下载并应用 BakaSU (ReSukiSU) 官方 4.14 补丁"
                 wget https://github.com/ReSukiSU/ReSukiSU_Patches/raw/main/scope-minimized/kernel-4.14.patch -O ksu-4.14.patch
-                patch -p1 < ksu-4.14.patch || { echo "补丁应用失败"; exit 1; }
+                patch -p1 < ksu-4.14.patch || { echo "⚠️ 补丁应用失败"; exit 1; }
                 ;;
             esac
           fi
@@ -328,10 +425,10 @@ jobs:
           cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
           echo "KSU_LOG: 启用 SUSFS"
           wget https://raw.githubusercontent.com/EnderPhantomWing/kernel-patch/refs/heads/main/susfs_patch_to_4.14.patch -O susfs-4.14.patch
-          patch -p1 < susfs-4.14.patch || { echo "SUSFS 补丁应用失败"; exit 1; }
+          patch -p1 < susfs-4.14.patch || { echo "⚠️ SUSFS 补丁应用失败"; exit 1; }
           sed -i 's/^orig_flow:$/orig_flow:;/' fs/notify/fdinfo.c
           grep -q '^orig_flow:;$' fs/notify/fdinfo.c \
-            || { echo "SUSFS fdinfo 兼容性修复失败"; exit 1; }
+            || { echo "⚠️ SUSFS fdinfo 兼容性修复失败"; exit 1; }
 
       - name: 启用 NoMount
         if: env.ENABLE_NOMOUNT == 'true'
@@ -341,7 +438,7 @@ jobs:
           curl -LfsS \
             https://raw.githubusercontent.com/maxsteeel/nomount/refs/heads/dev/kernel/setup.sh \
             -o nomount-setup.sh \
-            || { echo "下载 NoMount setup 脚本失败"; exit 1; }
+            || { echo "⚠️ 下载 NoMount setup 脚本失败"; exit 1; }
           bash nomount-setup.sh dev
 
       - name: 注入 Root 核心代码
@@ -425,7 +522,7 @@ jobs:
 
           if [ -f android-kernel/net/netfilter/xt_qtaguid.c ]; then
             wget https://raw.githubusercontent.com/wu17481748/android-lxc-docker/refs/heads/main/xt_qtaguid.patch
-            patch -p0 < xt_qtaguid.patch || { echo "xt_qtaguid patch 失败"; exit 1; }
+            patch -p0 < xt_qtaguid.patch || { echo "⚠️ xt_qtaguid patch 失败"; exit 1; }
           fi
 
           sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' android-kernel/arch/arm64/configs/PFGM00_defconfig
@@ -835,10 +932,11 @@ jobs:
             echo "| Variable | Value |"
             echo "|------|-----|"
             echo "| **Branch** | ${{ inputs.branch }} |"
-            echo "| **Root Config** | ${{ needs.setup.outputs.matrix }} |"
             echo "| **Total** | ${{ needs.setup.outputs.total }} |"
             echo "| **Publish Tag** | ${{ needs.setup.outputs.tag }} |"
             echo "| **Tag Features** | \`${{ needs.setup.outputs.tag_features }}\` |"
+            echo "| **Root Type** | \`${{ needs.setup.outputs.root_config }}\` |"
+            echo "| **Root Count** | ${{ needs.setup.outputs.root_count }} |"
             echo "| **Enable BBR** | ${{ inputs.enable_bbr }} |"
             echo "| **Enable DroidSpace** | ${{ inputs.enable_droidspace }} |"
             echo "| **Enable SUSFS (BakaSU only)** | ${{ inputs.enable_susfs }} |"
@@ -879,13 +977,13 @@ jobs:
           echo "$MATRIX" | jq -r '.[] | [.root, .artifact] | @tsv' | while IFS=$'\t' read -r root artifact; do
             MV_FILE="artifacts/manager_version_${root}.txt"
             if [ ! -f "$MV_FILE" ]; then
-              echo "跳过 ${root}: 未找到 manager 版本文件"
+              echo "⚠️ 跳过 ${root}: 未找到 manager 版本文件"
               continue
             fi
 
             MV=$(tr -d '[:space:]' < "$MV_FILE")
             if [ -z "$MV" ]; then
-              echo "跳过 ${root}: manager 版本为空"
+              echo "⚠️ 跳过 ${root}: manager 版本为空"
               continue
             fi
 
@@ -918,7 +1016,7 @@ jobs:
             MATCHED_TAG=$(echo "$ASSET_JSON"  | jq -r '.tag  // empty')
 
             if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-              echo "警告: 未找到匹配 ${MV_CLEAN} 的 *-arm64-v8a-release.apk，跳过 ${root}"
+              echo "⚠️ 警告: 未找到匹配 ${MV_CLEAN} 的 *-arm64-v8a-release.apk，跳过 ${root}"
               continue
             fi
 
@@ -990,7 +1088,7 @@ jobs:
             MATCHED_TAG=$(echo "$ASSET_JSON"  | jq -r '.tag  // empty')
 
             if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-              echo "警告: 未找到匹配 ${MV_CLEAN} 的 *-release.apk，跳过 ${root}"
+              echo "⚠️ 警告: 未找到匹配 ${MV_CLEAN} 的 *-release.apk，跳过 ${root}"
               continue
             fi
 
