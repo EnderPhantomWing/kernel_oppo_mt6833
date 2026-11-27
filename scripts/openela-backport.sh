@@ -19,6 +19,7 @@
 #   --apply              真正写入工作区（默认 dry-run，只出报告）
 #   --cve-only           只处理提交信息里带 CVE-YYYY-NNNN 的提交（推荐用于大范围回移）
 #   --since DATE         GitHub since 参数，默认 2024-01-18（4.14.336 EOL 附近）
+#   --until DATE         GitHub until 参数（配合 --since 限定区间，如 2020-06-01~2024-01-18）
 #   --limit N            每个 path 最多处理 N 个提交，默认 200
 #   --report DIR         报告目录，默认 .openela-backport/<UTC 时间戳>
 #   --token TOKEN        GitHub token（也可用环境变量 GITHUB_TOKEN）
@@ -43,6 +44,7 @@ set -uo pipefail
 UPSTREAM_REPO="openela/kernel-lts"
 BRANCH="linux-4.14.y"
 SINCE="2024-01-18"
+UNTIL=""
 LIMIT=200
 APPLY=0
 CVE_ONLY=0
@@ -59,6 +61,7 @@ while [ $# -gt 0 ]; do
 		--apply) APPLY=1 ;;
 		--cve-only) CVE_ONLY=1 ;;
 		--since) SINCE="${2:?--since needs a date}"; shift ;;
+		--until) UNTIL="${2:?--until needs a date}"; shift ;;
 		--limit) LIMIT="${2:?--limit needs a number}"; shift ;;
 		--report) REPORT="${2:?--report needs a dir}"; shift ;;
 		--token) TOKEN="${2:?--token needs a value}"; shift ;;
@@ -123,13 +126,23 @@ for path in "${PATHS[@]}"; do
 	page=1
 	seen=0
 	while [ "$seen" -lt "$LIMIT" ]; do
-		url="https://api.github.com/repos/$UPSTREAM_REPO/commits?sha=$BRANCH&path=$path&since=$SINCE&per_page=100&page=$page"
-		api "$url" "$REPORT/list.json" || die "API request failed"
-
-		if jq -e 'type == "object" and has("message")' "$REPORT/list.json" >/dev/null 2>&1; then
-			msg=$(jq -r '.message' "$REPORT/list.json")
-			die "GitHub API error: $msg（设置 GITHUB_TOKEN 可提高限额）"
-		fi
+		url="https://api.github.com/repos/$UPSTREAM_REPO/commits?sha=$BRANCH&path=$path&since=$SINCE&per_page=50&page=$page"
+		[ -n "$UNTIL" ] && url="$url&until=$UNTIL"
+		attempt=0
+		while :; do
+			attempt=$((attempt + 1))
+			api "$url" "$REPORT/list.json" || die "API request failed"
+			if jq -e 'type == "object" and has("message")' "$REPORT/list.json" >/dev/null 2>&1; then
+				msg=$(jq -r '.message' "$REPORT/list.json")
+				# GitHub 对超大 path 查询偶尔返回 500，重试即可
+				if [ "$msg" = "Server Error" ] && [ "$attempt" -lt 3 ]; then
+					sleep $((attempt * 3))
+					continue
+				fi
+				die "GitHub API error: $msg（设置 GITHUB_TOKEN 可提高限额）"
+			fi
+			break
+		done
 
 		n=$(jq 'length' "$REPORT/list.json")
 		[ "$n" -eq 0 ] && break
