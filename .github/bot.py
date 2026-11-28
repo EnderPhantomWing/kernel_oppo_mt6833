@@ -5,9 +5,12 @@ import requests
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
-# 支持多个 chat id：
-#   CHAT_ID="-1001111111111,-1002222222222"
-#   也支持分号、空白、换行分隔
+# CHAT_ID 支持多个目标，格式：
+#   -1002961023447:351,-1001111111111,-1002222222222:888
+# 规则：
+#   - 不带 ":" → 普通 chat（频道 / 普通群）
+#   - 带 ":"   → forum 话题：chat_id:thread_id
+# 分隔符：逗号 / 分号 / 空白 / 换行 均可；自动去重保序
 CHAT_ID_RAW = os.environ.get("CHAT_ID", "").strip()
 
 MAX_SIZE = 50 * 1024 * 1024   # Bot API 单文件上限
@@ -15,32 +18,58 @@ MAX_CAPTION = 1024            # Telegram caption 上限
 MAX_ALBUM = 10                # Telegram 单个 album 上限
 
 
-def parse_chat_ids(raw):
-    """把 CHAT_ID 拆分为去重保序的列表。"""
+# ==============================
+# 解析目标
+# ==============================
+def parse_targets(raw):
+    """
+    解析 CHAT_ID 环境变量，返回：
+        [{"chat_id": "-100...", "thread_id": "351" | None}, ...]
+    """
     if not raw:
         raise SystemExit("[-] CHAT_ID is empty or not set.")
 
-    parts = []
-    for chunk in raw.replace(";", ",").replace("\r", ",").replace("\n", ",").split(","):
-        cid = chunk.strip()
-        if cid:
-            parts.append(cid)
+    chunks = []
+    normalized = raw.replace(";", ",").replace("\r", ",").replace("\n", ",")
+    for part in normalized.split(","):
+        p = part.strip()
+        if p:
+            chunks.append(p)
 
-    seen = set()
-    result = []
-    for cid in parts:
-        if cid not in seen:
-            seen.add(cid)
-            result.append(cid)
+    result, seen = [], set()
+    for p in chunks:
+        if ":" in p:
+            cid, tid = p.split(":", 1)
+            cid, tid = cid.strip(), (tid.strip() or None)
+        else:
+            cid, tid = p, None
+
+        if not cid:
+            continue
+
+        key = (cid, tid)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({"chat_id": cid, "thread_id": tid})
 
     if not result:
         raise SystemExit("[-] No valid CHAT_ID found.")
     return result
 
 
-CHAT_IDS = parse_chat_ids(CHAT_ID_RAW)
+TARGETS = parse_targets(CHAT_ID_RAW)
 
 
+def target_label(target):
+    if target.get("thread_id"):
+        return f"{target['chat_id']}:{target['thread_id']}"
+    return target["chat_id"]
+
+
+# ==============================
+# 工具
+# ==============================
 def truncate_caption(caption):
     if not caption:
         return None
@@ -54,20 +83,23 @@ def check_files(files):
     if not files:
         raise SystemExit("[-] No file paths provided.")
     if len(files) > MAX_ALBUM:
-        raise SystemExit(f"[-] Too many files ({len(files)}), Telegram album max is {MAX_ALBUM}.")
+        raise SystemExit(
+            f"[-] Too many files ({len(files)}), Telegram album max is {MAX_ALBUM}."
+        )
     for path in files:
         if not os.path.isfile(path):
             raise SystemExit(f"[-] File not found: {path}")
         size = os.path.getsize(path)
         if size > MAX_SIZE:
             raise SystemExit(
-                f"[-] {path} is {size / 1024**2:.1f}MB, exceeds Bot API 50MB limit. "
+                f"[-] {path} is {size / 1024**2:.1f}MB, "
+                f"exceeds Bot API 50MB limit. "
                 f"Split the zip or switch back to Telethon/MTProto."
             )
 
 
-def handle_response(resp, chat_id=None):
-    ctx = f" chat_id={chat_id}" if chat_id is not None else ""
+def handle_response(resp, target=None):
+    ctx = f" target={target_label(target)}" if target else ""
     try:
         body = resp.json()
     except ValueError:
@@ -76,31 +108,39 @@ def handle_response(resp, chat_id=None):
     if not body.get("ok"):
         desc = body.get("description", resp.text)
         if "not a member" in desc or "chat not found" in desc:
-            raise SystemExit(f"[-] Bot can't access channel{ctx}. Check CHAT_ID. ({desc})")
+            raise SystemExit(f"[-] Bot can't access chat{ctx}. Check CHAT_ID. ({desc})")
         if "not enough rights" in desc or "CHAT_WRITE_FORBIDDEN" in desc:
             raise SystemExit(f"[-] Bot lacks 'Post Messages' permission{ctx}. ({desc})")
+        if "message thread not found" in desc:
+            raise SystemExit(f"[-] Topic (message_thread_id) not found{ctx}. ({desc})")
         if "MEDIA_CAPTION_TOO_LONG" in desc:
             raise SystemExit(f"[-] Caption too long{ctx}. ({desc})")
         raise SystemExit(f"[-] Telegram API error{ctx}: {desc}")
 
 
-def send_single(chat_id, path, caption=None):
-    """单文件：sendDocument"""
+# ==============================
+# 发送：单文件
+# ==============================
+def send_single(target, path, caption=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
-    data = {"chat_id": chat_id, "parse_mode": "HTML"}
+    data = {"chat_id": target["chat_id"], "parse_mode": "HTML"}
+    if target.get("thread_id"):
+        data["message_thread_id"] = target["thread_id"]
     if caption:
         data["caption"] = caption
 
     with open(path, "rb") as f:
         resp = requests.post(url, data=data, files={"document": f}, timeout=300)
 
-    handle_response(resp, chat_id)
+    handle_response(resp, target)
     size = os.path.getsize(path)
-    print(f"[+] Sent single -> {chat_id}: {path} ({size / 1024**2:.1f}MB)")
+    print(f"[+] Sent single -> {target_label(target)}: {path} ({size / 1024**2:.1f}MB)")
 
 
-def send_album(chat_id, files, caption=None):
-    """多文件：sendMediaGroup，caption 挂在第一个文件上，其余不带"""
+# ==============================
+# 发送：多文件 album
+# ==============================
+def send_album(target, files, caption=None):
     media = []
     files_payload = {}
     handles = []
@@ -118,21 +158,31 @@ def send_album(chat_id, files, caption=None):
             files_payload[f"file{i}"] = (os.path.basename(path), fh)
 
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMediaGroup"
-        data = {"chat_id": chat_id, "media": json.dumps(media)}
+        data = {"chat_id": target["chat_id"], "media": json.dumps(media)}
+        if target.get("thread_id"):
+            data["message_thread_id"] = target["thread_id"]
+
         resp = requests.post(url, data=data, files=files_payload, timeout=600)
     finally:
         for fh in handles:
             fh.close()
 
-    handle_response(resp, chat_id)
+    handle_response(resp, target)
     total = sum(os.path.getsize(p) for p in files)
-    print(f"[+] Sent album -> {chat_id}: {len(files)} file(s), total {total / 1024**2:.1f}MB")
+    print(
+        f"[+] Sent album -> {target_label(target)}: "
+        f"{len(files)} file(s), total {total / 1024**2:.1f}MB"
+    )
     for p in files:
         print(f"    - {p} ({os.path.getsize(p) / 1024**2:.1f}MB)")
 
 
+# ==============================
+# main
+# ==============================
 def main():
     args = sys.argv[1:]
+
     caption = None
     if "--caption" in args:
         i = args.index("--caption")
@@ -144,30 +194,33 @@ def main():
     check_files(args)
     caption = truncate_caption(caption)
 
-    print(f"[=] Target chat_ids: {CHAT_IDS}")
+    print(f"[=] Target chats ({len(TARGETS)}):")
+    for t in TARGETS:
+        print(f"    - {target_label(t)}")
 
     ok, fail = [], []
-    for cid in CHAT_IDS:
+    for t in TARGETS:
         try:
             if len(args) == 1:
-                send_single(cid, args[0], caption)
+                send_single(t, args[0], caption)
             else:
-                send_album(cid, args, caption)
-            ok.append(cid)
+                send_album(t, args, caption)
+            ok.append(t)
         except SystemExit as e:
-            print(f"[-] chat_id={cid} failed: {e}")
-            fail.append(cid)
+            print(f"[-] {target_label(t)} failed: {e}")
+            fail.append(t)
         except Exception as e:
-            print(f"[-] chat_id={cid} failed: {e!r}")
-            fail.append(cid)
+            print(f"[-] {target_label(t)} failed: {e!r}")
+            fail.append(t)
 
-    print(f"[=] Summary: success={len(ok)}/{len(CHAT_IDS)}")
+    print(f"[=] Summary: success={len(ok)}/{len(TARGETS)}")
     if fail:
-        print(f"[!] Failed chat_ids: {fail}")
+        print(f"[!] Failed targets: {[target_label(t) for t in fail]}")
         if not ok:
-            raise SystemExit("[-] All chat_ids failed.")
-        raise SystemExit(f"[-] Partial failure: {fail}")
-    print("[+] All chat_ids sent successfully.")
+            raise SystemExit("[-] All targets failed.")
+        raise SystemExit(f"[-] Partial failure: {[target_label(t) for t in fail]}")
+
+    print("[+] All targets sent successfully.")
 
 
 if __name__ == "__main__":
